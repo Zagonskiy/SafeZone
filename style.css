@@ -3,7 +3,7 @@ body {
     background-color: #2b2b2b;
     font-family: 'Courier New', Courier, monospace; /* Технический шрифт */
     display: flex;
-    justify_content: center;
+    justify-content: center;
     align-items: center;
     height: 100vh;
     margin: 0;
