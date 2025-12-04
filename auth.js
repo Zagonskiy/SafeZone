@@ -1,5 +1,10 @@
 // auth.js
 import { auth, db, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, doc, setDoc } from "./firebase-config.js";
+import { 
+    auth, db, createUserWithEmailAndPassword, signInWithEmailAndPassword, 
+    onAuthStateChanged, doc, setDoc, 
+    collection, query, where, getDocs // <--- ДОБАВЛЕНО
+} from "./firebase-config.js";
 
 // Элементы DOM
 const loginForm = document.getElementById('login-form');
@@ -57,17 +62,49 @@ document.getElementById('btn-register').addEventListener('click', async () => {
     }
 });
 
-// --- ВХОД ---
+// --- ВХОД (ОБНОВЛЕННЫЙ) ---
 document.getElementById('btn-login').addEventListener('click', async () => {
-    const email = document.getElementById('login-email').value;
+    const inputVal = document.getElementById('login-email').value; // Тут может быть ник или почта
     const pass = document.getElementById('login-password').value;
     const errorMsg = document.getElementById('login-error');
+    
+    errorMsg.innerText = ""; // Очистить старые ошибки
+
+    let emailToUse = inputVal;
 
     try {
-        await signInWithEmailAndPassword(auth, email, pass);
-        // Успех
+        // Проверяем: это почта или ник? (есть ли символ @)
+        if (!inputVal.includes('@')) {
+            // Если нет @, значит это ник. Ищем почту в базе.
+            const usersRef = collection(db, "users");
+            // Запрос: найди документы, где поле nickname равно введенному значению
+            const q = query(usersRef, where("nickname", "==", inputVal));
+            const querySnapshot = await getDocs(q);
+
+            if (querySnapshot.empty) {
+                throw new Error("Позывной не найден.");
+            }
+
+            // Берем почту первого найденного пользователя
+            emailToUse = querySnapshot.docs[0].data().email;
+        }
+
+        // Теперь у нас точно есть почта (либо ввели сразу, либо нашли по нику)
+        // Выполняем обычный вход
+        await signInWithEmailAndPassword(auth, emailToUse, pass);
+        // Если успех - сработает onAuthStateChanged и перекинет на app.html
+
     } catch (error) {
-        errorMsg.innerText = "Ошибка доступа: Неверные данные.";
+        console.error(error); // Полезно смотреть в консоль (F12)
+        
+        let message = "Ошибка доступа.";
+        if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
+            message = "Неверный пароль или логин.";
+        } else if (error.message === "Позывной не найден.") {
+            message = "Такой позывной не зарегистрирован.";
+        }
+        
+        errorMsg.innerText = message;
     }
 });
 
