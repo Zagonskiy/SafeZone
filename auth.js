@@ -22,44 +22,62 @@ goToLogin.addEventListener('click', () => {
     loginForm.classList.remove('hidden');
 });
 
-// --- РЕГИСТРАЦИЯ ---
-document.getElementById('btn-register').addEventListener('click', async () => {
-    const nick = document.getElementById('reg-nick').value;
-    const email = document.getElementById('reg-email').value;
-    const pass = document.getElementById('reg-pass').value;
-    const passConfirm = document.getElementById('reg-pass-confirm').value;
-    const errorMsg = document.getElementById('reg-error');
+// --- РЕГИСТРАЦИЯ (С ОТЛАДКОЙ) ---
+const btnRegister = document.getElementById('btn-register');
+if (btnRegister) {
+    btnRegister.addEventListener('click', async () => {
+        console.log("1. Нажата кнопка регистрации");
+        
+        const nick = document.getElementById('reg-nick').value;
+        const email = document.getElementById('reg-email').value;
+        const pass = document.getElementById('reg-pass').value;
+        const passConfirm = document.getElementById('reg-pass-confirm').value;
+        const errorMsg = document.getElementById('reg-error');
 
-    errorMsg.innerText = "";
+        errorMsg.innerText = "";
 
-    if(pass !== passConfirm) {
-        errorMsg.innerText = "Ошибка: Пароли не совпадают!";
-        return;
-    }
+        if(pass !== passConfirm) {
+            errorMsg.innerText = "Пароли не совпадают!";
+            return;
+        }
 
-    if(!nick) {
-        errorMsg.innerText = "Ошибка: Введите позывной!";
-        return;
-    }
+        if(!nick) {
+            errorMsg.innerText = "Введите позывной!";
+            return;
+        }
 
-    try {
-        // 1. Создаем пользователя в Auth
-        const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
-        const user = userCredential.user;
+        try {
+            console.log("2. Пытаюсь создать пользователя в Auth...");
+            const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
+            const user = userCredential.user;
+            console.log("3. Пользователь в Auth создан! UID:", user.uid);
 
-        // 2. Сохраняем ник и почту в Firestore (коллекция "users")
-        await setDoc(doc(db, "users", user.uid), {
-            nickname: nick,
-            email: email,
-            createdAt: new Date()
-        });
-
-        alert("Доступ разрешен. Добро пожаловать, " + nick);
-        // Переадресация произойдет автоматически через onAuthStateChanged
-    } catch (error) {
-        errorMsg.innerText = "Ошибка системы: " + error.message;
-    }
-});
+            console.log("4. Пытаюсь записать данные в Firestore...");
+            
+            // Внимание: проверь, что 'users' написано так же, как в правилах
+            await setDoc(doc(db, "users", user.uid), {
+                nickname: nick,
+                email: email,
+                createdAt: new Date().toISOString() // Используем строку для надежности
+            });
+            
+            console.log("5. УРА! Запись в базу прошла успешно!");
+            alert("Доступ разрешен. Позывной: " + nick);
+            
+        } catch (error) {
+            console.error("КРИТИЧЕСКАЯ ОШИБКА:", error);
+            
+            // Расшифровка ошибок для тебя
+            if (error.code === 'auth/email-already-in-use') {
+                errorMsg.innerText = "Эта почта уже занята (удали её в Authentication).";
+            } else if (error.code === 'permission-denied') {
+                errorMsg.innerText = "Ошибка прав доступа (проверь Rules).";
+            } else {
+                errorMsg.innerText = "Ошибка: " + error.message;
+            }
+        }
+    });
+}
 
 // --- ВХОД (ОБНОВЛЕННЫЙ) ---
 document.getElementById('btn-login').addEventListener('click', async () => {
