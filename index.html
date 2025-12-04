@@ -1,1 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>SafeZone - Доступ</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
 
+    <div class="device-container">
+        <div id="login-form">
+            <h2>SafeZone // Вход</h2>
+            <div id="login-error" class="error-msg"></div>
+            <input type="email" id="login-email" placeholder="Электронная почта">
+            <input type="password" id="login-password" placeholder="Пароль">
+            <button id="btn-login">Войти в систему</button>
+            <span class="toggle-link" id="go-to-register">Создать новый канал связи</span>
+        </div>
+
+        <div id="register-form" class="hidden">
+            <h2>Регистрация</h2>
+            <div id="reg-error" class="error-msg"></div>
+            <input type="text" id="reg-nick" placeholder="Позывной (Никнейм)">
+            <input type="email" id="reg-email" placeholder="Электронная почта">
+            <input type="password" id="reg-pass" placeholder="Пароль">
+            <input type="password" id="reg-pass-confirm" placeholder="Повторите пароль">
+            <button id="btn-register">Зарегистрироваться</button>
+            <span class="toggle-link" id="go-to-login">Уже есть аккаунт</span>
+        </div>
+    </div>
+
+    <script type="module" src="auth.js"></script>
+</body>
+</html>
