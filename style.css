@@ -2,7 +2,7 @@
 :root {
     --metal-dark: #2b2b2b;
     --metal-light: #4a4a4a;
-    --screen-bg: #0f1a10; /* Темно-зеленый терминал */
+    --screen-bg: #0f1a10; 
     --text-green: #33ff33;
     --text-dim: #1a801a;
     --alert-red: #ff3333;
@@ -20,58 +20,45 @@ body {
     color: var(--text-green);
 }
 
-/* КОРПУС УСТРОЙСТВА (Скевоморфизм) */
+/* КОРПУС УСТРОЙСТВА */
 .device-case {
     width: 400px;
     background: linear-gradient(145deg, #444, #222);
     border-radius: 20px;
     padding: 20px;
-    box-shadow: 
-        10px 10px 30px rgba(0,0,0,0.8),
-        inset 1px 1px 2px rgba(255,255,255,0.1);
+    box-shadow: 10px 10px 30px rgba(0,0,0,0.8), inset 1px 1px 2px rgba(255,255,255,0.1);
     position: relative;
     border: 2px solid #111;
 }
 
 /* БОЛТЫ */
 .screw {
-    width: 15px;
-    height: 15px;
-    background: radial-gradient(circle, #555, #222);
-    border-radius: 50%;
-    position: absolute;
-    box-shadow: inset 1px 1px 2px black;
+    width: 15px; height: 15px; background: radial-gradient(circle, #555, #222);
+    border-radius: 50%; position: absolute; box-shadow: inset 1px 1px 2px black;
 }
-.tl { top: 10px; left: 10px; }
-.tr { top: 10px; right: 10px; }
-.bl { bottom: 10px; left: 10px; }
-.br { bottom: 10px; right: 10px; }
+.tl { top: 10px; left: 10px; } .tr { top: 10px; right: 10px; }
+.bl { bottom: 10px; left: 10px; } .br { bottom: 10px; right: 10px; }
 
 /* ЭКРАН */
 .screen-container {
     background-color: var(--screen-bg);
-    border-radius: 5px;
-    border: 4px solid #111;
-    height: 600px;
-    padding: 20px;
+    border-radius: 5px; border: 4px solid #111;
+    height: 600px; padding: 20px;
     box-shadow: inset 0 0 20px rgba(0,0,0,0.9);
-    overflow: hidden;
-    position: relative;
+    overflow: hidden; position: relative;
+    display: flex; flex-direction: column; /* Важно для структуры */
 }
 
-/* Эффект старого монитора (scanlines) */
+/* Scanlines */
 .screen-container::after {
-    content: " ";
-    display: block;
-    position: absolute;
+    content: " "; display: block; position: absolute;
     top: 0; left: 0; bottom: 0; right: 0;
     background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
     background-size: 100% 2px, 3px 100%;
-    pointer-events: none;
-    z-index: 10;
+    pointer-events: none; z-index: 10;
 }
 
-.screen { display: none; height: 100%; flex-direction: column; }
+.screen { display: none; height: 100%; flex-direction: column; width: 100%; }
 .screen.active { display: flex; }
 
 /* ТИПОГРАФИКА */
@@ -80,161 +67,101 @@ h1 { font-size: 2rem; text-align: center; text-shadow: 0 0 10px var(--text-green
 .status { text-align: center; font-size: 0.8rem; border-bottom: 1px dashed var(--text-dim); padding-bottom: 10px; margin-bottom: 20px; }
 .military-title { font-size: 1rem; background: var(--text-dim); color: black; padding: 2px 5px; display: inline-block; margin-bottom: 15px; }
 
-/* ОБНОВЛЕННЫЕ ПОЛЯ ВВОДА */
+/* ПОЛЯ ВВОДА */
+.input-group { margin-bottom: 15px; }
+label { display: block; font-size: 0.7rem; margin-bottom: 5px; opacity: 0.8; }
+
 input {
     width: 100%;
-    background: #050505; /* Почти черный */
+    background: #050505;
     border: 1px solid var(--text-dim);
-    border-left: 3px solid var(--text-dim); /* Военный стиль слева */
+    border-left: 3px solid var(--text-dim);
     color: var(--text-green);
-    padding: 15px; /* Больше пространства внутри */
+    padding: 10px;
     font-family: 'Courier New', Courier, monospace;
-    font-size: 1rem; /* Крупный текст */
+    font-size: 1rem;
     box-sizing: border-box;
     outline: none;
     transition: 0.3s;
 }
-input:focus {
-    background: #0a150a;
-    border-color: var(--text-green);
-    box-shadow: 0 0 10px rgba(51, 255, 51, 0.2);
-}
+input:focus { border-color: var(--text-green); box-shadow: 0 0 10px rgba(51, 255, 51, 0.2); }
 
-/* Специально для чата, чтобы поле не плющилось */
-.msg-input-area {
-    display: flex;
-    gap: 10px;
-    padding-top: 10px;
-    height: 60px; /* Фиксированная высота блока ввода */
-}
-.msg-input-area input {
-    height: 100%; /* Растянуть на всю высоту */
-}
-
-/* КНОПКИ (МЕТАЛЛИЧЕСКИЕ) */
+/* КНОПКИ */
 .btn-metal {
     width: 100%;
     background: linear-gradient(180deg, #555, #333);
-    color: #fff;
-    border: 1px solid #000;
-    padding: 12px;
-    font-family: inherit;
-    font-weight: bold;
-    cursor: pointer;
-    box-shadow: 
-        inset 1px 1px 0 rgba(255,255,255,0.2),
-        2px 2px 5px rgba(0,0,0,0.5);
-    text-transform: uppercase;
-    margin-top: 10px;
+    color: #fff; border: 1px solid #000;
+    padding: 12px; font-family: inherit; font-weight: bold;
+    cursor: pointer; box-shadow: inset 1px 1px 0 rgba(255,255,255,0.2), 2px 2px 5px rgba(0,0,0,0.5);
+    text-transform: uppercase; margin-top: 10px;
 }
-.btn-metal:active {
-    background: linear-gradient(180deg, #333, #555);
-    box-shadow: inset 2px 2px 5px rgba(0,0,0,0.8);
-    transform: translateY(2px);
-}
+.btn-metal:active { background: linear-gradient(180deg, #333, #555); transform: translateY(2px); }
 .btn-metal.danger { border-bottom: 3px solid var(--alert-red); }
+.btn-small { background: #333; color: white; border: 1px solid #555; cursor: pointer; font-family: inherit; padding: 5px 10px; }
 
-/* УТИЛИТЫ */
-.switch-mode { font-size: 0.8rem; text-align: center; cursor: pointer; text-decoration: underline; margin-top: 15px; }
-.console-output { font-size: 0.7rem; color: var(--alert-red); margin-top: 10px; min-height: 20px; }
-
-/* ЭКРАН ШТАБА */
-.top-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--text-dim); padding-bottom: 10px; margin-bottom: 20px; }
-.chat-list-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; opacity: 0.5; }
-.radar-scan {
-    width: 50px; height: 50px; border: 2px solid var(--text-green); border-radius: 50%;
-    position: relative; margin-bottom: 20px;
-}
-.radar-scan::after {
-    content: ''; position: absolute; top: 0; left: 0; width: 50%; height: 50%;
-    background: linear-gradient(45deg, transparent 50%, var(--text-green) 100%);
-    border-radius: 100% 0 0 0;
-    top: 50%; left: 50%; transform-origin: 0 0;
-    animation: radar 2s infinite linear;
-}
-@keyframes radar { to { transform: rotate(360deg); } }
-
-.btn-small { background: #333; color: white; border: 1px solid #555; cursor: pointer; font-family: inherit; }
-
-/* СПИСКИ И СКРОЛЛ */
-.scroll-zone { flex: 1; overflow-y: auto; padding-right: 5px; }
-/* Кастомный скроллбар для стиля */
-::-webkit-scrollbar { width: 8px; background: #000; }
-::-webkit-scrollbar-thumb { background: var(--text-dim); border-radius: 4px; }
-
-/* ЭЛЕМЕНТ СПИСКА ЧАТОВ */
-.chat-item {
-    border: 1px dashed var(--text-dim);
-    padding: 10px; margin-bottom: 10px; cursor: pointer;
-    transition: 0.2s; background: rgba(0,20,0,0.5);
-}
-.chat-item:hover { background: var(--text-dim); color: black; }
-
-/* СООБЩЕНИЯ */
+/* ЗОНА ЧАТА И ВВОДА (ИСПРАВЛЕНИЕ) */
 .messages-container {
     flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px;
     border: 1px solid var(--text-dim); margin-bottom: 10px; background: rgba(0,0,0,0.3);
 }
 
-.msg {
-    max-width: 80%; padding: 8px; border-radius: 4px; position: relative;
-    border-left: 3px solid var(--text-dim); font-size: 0.9rem;
+.msg-input-area {
+    display: flex; /* Выстраиваем в ряд */
+    gap: 10px;
+    height: auto;
+    padding-bottom: 5px;
 }
+
+.msg-input-area input {
+    flex: 1; /* Занимает все свободное место */
+    height: 50px; /* Высота поля */
+}
+
+.btn-send {
+    width: auto; /* Кнопка по ширине текста */
+    margin-top: 0; /* Убираем отступ сверху */
+    padding: 0 20px;
+    height: 50px; /* Высота как у поля */
+}
+
+/* УТИЛИТЫ */
+.switch-mode { font-size: 0.8rem; text-align: center; cursor: pointer; text-decoration: underline; margin-top: 15px; }
+.console-output { font-size: 0.7rem; color: var(--alert-red); margin-top: 10px; min-height: 20px; }
+.top-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--text-dim); padding-bottom: 10px; margin-bottom: 15px; }
+.search-panel { display: flex; gap: 10px; margin-bottom: 15px; }
+.search-panel input { flex: 1; }
+
+/* СООБЩЕНИЯ */
+.msg { max-width: 80%; padding: 8px; border-radius: 4px; position: relative; border-left: 3px solid var(--text-dim); font-size: 0.9rem; }
 .msg.my { align-self: flex-end; border-left: none; border-right: 3px solid var(--text-green); text-align: right; background: rgba(0, 50, 0, 0.4); }
 .msg.other { align-self: flex-start; background: rgba(50, 50, 50, 0.4); }
-
 .msg-meta { font-size: 0.6rem; opacity: 0.6; margin-top: 5px; display: flex; gap: 10px; justify-content: flex-end; }
-.msg-text { word-wrap: break-word; }
+.msg-controls span { cursor: pointer; margin-right: 5px; }
 
-/* КНОПКИ УПРАВЛЕНИЯ СООБЩЕНИЕМ */
-.msg-controls { font-size: 0.7rem; margin-right: 10px; cursor: pointer; letter-spacing: 3px; }
-.btn-edit:hover { color: yellow; }
-.btn-del:hover { color: red; }
+/* СПИСОК ЧАТОВ */
+.scroll-zone { flex: 1; overflow-y: auto; }
+.chat-item { border: 1px dashed var(--text-dim); padding: 10px; margin-bottom: 10px; cursor: pointer; background: rgba(0,20,0,0.5); }
+.chat-item:hover { background: var(--text-dim); color: black; }
+.chat-list-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; opacity: 0.5; }
 
-/* ПОЛЕ ВВОДА В ЧАТЕ */
-.msg-input-area { display: flex; gap: 10px; }
-.msg-input-area input { flex: 1; }
+/* СКРОЛЛБАР */
+::-webkit-scrollbar { width: 8px; background: #000; }
+::-webkit-scrollbar-thumb { background: var(--text-dim); border-radius: 4px; }
 
-/* --- СИСТЕМА УВЕДОМЛЕНИЙ (MODALS) --- */
+/* МОДАЛЬНЫЕ ОКНА */
 .modal-overlay {
-    position: fixed;
-    top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0, 0, 0, 0.85); /* Затемнение фона */
-    display: none; /* Скрыто по умолчанию */
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-    backdrop-filter: blur(2px);
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.85); display: none;
+    justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(2px);
 }
 .modal-overlay.active { display: flex; }
-
 .modal-box {
-    width: 350px;
-    background: #1a1a1a;
-    border: 2px solid var(--alert-red); /* Красная рамка тревоги */
-    box-shadow: 0 0 30px rgba(255, 0, 0, 0.2);
-    padding: 20px;
-    position: relative;
-    text-align: center;
+    width: 350px; background: #1a1a1a; border: 2px solid var(--alert-red);
+    box-shadow: 0 0 30px rgba(255, 0, 0, 0.2); padding: 20px; position: relative; text-align: center;
 }
-/* Уголки для окна */
-.modal-box::before {
-    content: ''; position: absolute; top: -2px; left: -2px; width: 10px; height: 10px; background: var(--alert-red);
-}
-.modal-box::after {
-    content: ''; position: absolute; bottom: -2px; right: -2px; width: 10px; height: 10px; background: var(--alert-red);
-}
-
-.modal-title {
-    color: var(--alert-red);
-    border-bottom: 1px dashed var(--alert-red);
-    padding-bottom: 10px; margin-bottom: 15px;
-    font-weight: bold; letter-spacing: 2px;
-}
-
+.modal-box::before { content: ''; position: absolute; top: -2px; left: -2px; width: 10px; height: 10px; background: var(--alert-red); }
+.modal-box::after { content: ''; position: absolute; bottom: -2px; right: -2px; width: 10px; height: 10px; background: var(--alert-red); }
+.modal-title { color: var(--alert-red); border-bottom: 1px dashed var(--alert-red); padding-bottom: 10px; margin-bottom: 15px; font-weight: bold; }
 .modal-text { margin-bottom: 20px; color: #fff; font-size: 0.9rem; }
-
 .modal-actions { display: flex; gap: 10px; justify-content: center; }
-
-/* Скрываем инпут в модалке, если он не нужен */
 #modal-input-field { display: none; margin-bottom: 20px; border-color: var(--alert-red); color: var(--alert-red); }
