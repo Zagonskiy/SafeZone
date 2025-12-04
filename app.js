@@ -1,19 +1,16 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+
+// 1. АВТОРИЗАЦИЯ (Только функции входа/выхода)
 import { 
     getAuth, 
     createUserWithEmailAndPassword, 
     signInWithEmailAndPassword, 
     signOut, 
-    onAuthStateChanged,
-    addDoc, 
-    serverTimestamp, 
-    orderBy, 
-    onSnapshot, 
-    deleteDoc, 
-    updateDoc, 
-    arrayUnion
+    onAuthStateChanged 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+
+// 2. БАЗА ДАННЫХ (Все функции для работы с чатами и сообщениями перенесены сюда)
 import { 
     getFirestore, 
     doc, 
@@ -22,7 +19,14 @@ import {
     query, 
     where, 
     getDocs,
-    getDoc 
+    getDoc,
+    addDoc,             // <-- Перенесено сюда
+    serverTimestamp,    // <-- Перенесено сюда
+    orderBy,            // <-- Перенесено сюда
+    onSnapshot,         // <-- Перенесено сюда
+    deleteDoc,          // <-- Перенесено сюда
+    updateDoc,          // <-- Перенесено сюда
+    arrayUnion          // <-- Перенесено сюда
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // --- КОНФИГУРАЦИЯ (ВСТАВЬ СВОИ ДАННЫЕ СЮДА) ---
