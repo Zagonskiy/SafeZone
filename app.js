@@ -60,6 +60,51 @@ const registerForm = document.getElementById('register-form');
 const errorLog = document.getElementById('error-log');
 const userDisplay = document.getElementById('user-display');
 
+// --- СИСТЕМА МОДАЛЬНЫХ ОКОН (ЗАМЕНА ALERT/PROMPT) ---
+const modalOverlay = document.getElementById('custom-modal');
+const modalMsg = document.getElementById('modal-msg');
+const modalInput = document.getElementById('modal-input-field');
+const modalBtnConfirm = document.getElementById('modal-btn-confirm');
+const modalBtnCancel = document.getElementById('modal-btn-cancel');
+
+// Функция вызывает окно и ждет ответа (Promise)
+function showModal(text, type = 'alert', placeholder = '') {
+    return new Promise((resolve) => {
+        // Настройка UI
+        modalMsg.innerText = text;
+        modalOverlay.classList.add('active');
+        
+        // Сброс полей
+        modalInput.value = '';
+        modalInput.style.display = type === 'prompt' ? 'block' : 'none';
+        if(type === 'prompt') modalInput.placeholder = placeholder;
+
+        modalBtnCancel.style.display = type === 'alert' ? 'none' : 'block';
+        modalBtnConfirm.innerText = type === 'alert' ? 'OK' : 'ПРИНЯТЬ';
+
+        // Обработчики кнопок (одноразовые)
+        const cleanup = () => {
+            modalOverlay.classList.remove('active');
+            modalBtnConfirm.removeEventListener('click', onConfirm);
+            modalBtnCancel.removeEventListener('click', onCancel);
+        };
+
+        const onConfirm = () => {
+            cleanup();
+            if (type === 'prompt') resolve(modalInput.value); // Возвращаем текст
+            else resolve(true); // Возвращаем "ДА"
+        };
+
+        const onCancel = () => {
+            cleanup();
+            resolve(null); // Возвращаем "Пусто/Отмена"
+        };
+
+        modalBtnConfirm.addEventListener('click', onConfirm);
+        modalBtnCancel.addEventListener('click', onCancel);
+    });
+}
+
 // Переключатели
 document.getElementById('to-register').addEventListener('click', () => toggleForms(false));
 document.getElementById('to-login').addEventListener('click', () => toggleForms(true));
@@ -204,16 +249,16 @@ document.getElementById('btn-search').addEventListener('click', async () => {
     const snap = await getDocs(q);
 
     if (snap.empty) {
-        alert("БОЕЦ НЕ ОБНАРУЖЕН В СЕКТОРЕ");
-        return;
+    await showModal("БОЕЦ НЕ ОБНАРУЖЕН В СЕКТОРЕ", 'alert'); // Было alert()
+    return;
     }
 
     const targetUser = snap.docs[0].data();
     const targetUid = snap.docs[0].id;
 
     if (targetUid === auth.currentUser.uid) {
-        alert("НЕЛЬЗЯ СВЯЗАТЬСЯ С САМИМ СОБОЙ");
-        return;
+    await showModal("НЕЛЬЗЯ СВЯЗАТЬСЯ С САМИМ СОБОЙ", 'alert'); // Было alert()
+    return;
     }
 
     const chatDocId = [auth.currentUser.uid, targetUid].sort().join("_");
@@ -349,13 +394,17 @@ function renderMessage(docSnap) {
 
 // Глобальные функции
 window.deleteMsg = async (chatId, msgId) => {
-    if(confirm("ПОДТВЕРДИТЕ УНИЧТОЖЕНИЕ СООБЩЕНИЯ")) {
+    // Было: if(confirm(...))
+    const confirmed = await showModal("ПОДТВЕРДИТЕ УНИЧТОЖЕНИЕ СООБЩЕНИЯ", 'confirm');
+    if(confirmed) {
         await deleteDoc(doc(db, "chats", chatId, "messages", msgId));
     }
 };
 
 window.editMsg = async (chatId, msgId, oldText) => {
-    const newText = prompt("ВНЕСИТЕ КОРРЕКТИРОВКИ:", oldText);
+    // Было: const newText = prompt(...)
+    const newText = await showModal("ВНЕСИТЕ КОРРЕКТИРОВКИ:", 'prompt', oldText);
+    
     if (newText && newText !== oldText) {
         await updateDoc(doc(db, "chats", chatId, "messages", msgId), {
             text: newText,
