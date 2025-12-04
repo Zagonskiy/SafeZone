@@ -9,25 +9,72 @@
     <div class="device-container" style="text-align: center;">
         <h2>SafeZone</h2>
         <p>Соединение установлено.</p>
-        <p>Канал безопасен.</p>
         
+        <div style="border: 1px dashed red; padding: 10px; margin: 10px 0;">
+            <p style="font-size: 12px; color: red;">Зона отладки</p>
+            <input type="text" id="fix-nick" placeholder="Впиши сюда свой ник" style="padding: 5px;">
+            <button id="btn-fix-db" style="background: orange; margin-top: 5px;">Создать запись в БД вручную</button>
+            <div id="debug-log" style="font-size: 11px; margin-top: 5px; color: #333;"></div>
+        </div>
+
         <button id="btn-logout" style="background: linear-gradient(145deg, #d32f2f, #b71c1c);">Отключиться</button>
     </div>
 
     <script type="module">
-        import { auth, signOut, onAuthStateChanged } from "./firebase-config.js";
+        // Импортируем всё необходимое
+        import { auth, db, signOut, onAuthStateChanged, doc, setDoc } from "./firebase-config.js";
 
-        // Проверка: если не залогинен, выкидываем обратно
+        let currentUser = null;
+
+        // 1. Проверка входа
         onAuthStateChanged(auth, (user) => {
             if (!user) {
                 window.location.href = "index.html";
+            } else {
+                currentUser = user;
+                console.log("Текущий UID:", user.uid);
             }
         });
 
+        // 2. Кнопка выхода
         document.getElementById('btn-logout').addEventListener('click', () => {
             signOut(auth).then(() => {
                 window.location.href = "index.html";
             });
+        });
+
+        // 3. КНОПКА РЕМОНТА (ДИАГНОСТИКА)
+        document.getElementById('btn-fix-db').addEventListener('click', async () => {
+            const log = document.getElementById('debug-log');
+            const nick = document.getElementById('fix-nick').value;
+            
+            if (!nick) {
+                log.innerText = "Сначала впиши ник в поле выше!";
+                return;
+            }
+
+            log.innerText = "Начинаю запись в базу...";
+            log.style.color = "blue";
+
+            try {
+                if (!currentUser) throw new Error("Пользователь не найден. Перезагрузи страницу.");
+
+                // Пытаемся записать в Firestore
+                await setDoc(doc(db, "users", currentUser.uid), {
+                    nickname: nick,
+                    email: currentUser.email,
+                    repairedAt: new Date()
+                });
+
+                log.innerText = "УСПЕХ! Папка users создана. Теперь вход по нику заработает.";
+                log.style.color = "green";
+                alert("Успех! Теперь попробуй выйти и войти по этому нику.");
+
+            } catch (error) {
+                console.error(error);
+                log.innerHTML = "ОШИБКА: " + error.message + "<br>Код: " + error.code;
+                log.style.color = "red";
+            }
         });
     </script>
 </body>
