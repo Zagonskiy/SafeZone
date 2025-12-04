@@ -41,6 +41,10 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+let currentChatId = null;
+let unsubscribeMessages = null; // Чтобы отключать прослушку сообщений при выходе из чата
+let currentUserData = null; // Сюда сохраним данные текущего бойца
+
 // --- DOM ЭЛЕМЕНТЫ ---
 const authScreen = document.getElementById('auth-screen');
 const hqScreen = document.getElementById('hq-screen');
@@ -153,6 +157,12 @@ onAuthStateChanged(auth, async (user) => {
             userDisplay.innerText = `БОЕЦ: ${userDoc.data().nickname}`;
         } else {
             userDisplay.innerText = `БОЕЦ: ${user.email}`;
+        }
+        // ...код получения userDoc...
+        if (userDoc.exists()) {
+            currentUserData = { uid: user.uid, ...userDoc.data() };
+            userDisplay.innerText = `БОЕЦ: ${currentUserData.nickname}`;
+            loadMyChats(); // Запускаем загрузку списка чатов
         }
 
     } else {
