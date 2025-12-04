@@ -139,3 +139,42 @@ input:focus { border-color: var(--text-green); box-shadow: 0 0 5px var(--text-di
 @keyframes radar { to { transform: rotate(360deg); } }
 
 .btn-small { background: #333; color: white; border: 1px solid #555; cursor: pointer; font-family: inherit; }
+
+/* СПИСКИ И СКРОЛЛ */
+.scroll-zone { flex: 1; overflow-y: auto; padding-right: 5px; }
+/* Кастомный скроллбар для стиля */
+::-webkit-scrollbar { width: 8px; background: #000; }
+::-webkit-scrollbar-thumb { background: var(--text-dim); border-radius: 4px; }
+
+/* ЭЛЕМЕНТ СПИСКА ЧАТОВ */
+.chat-item {
+    border: 1px dashed var(--text-dim);
+    padding: 10px; margin-bottom: 10px; cursor: pointer;
+    transition: 0.2s; background: rgba(0,20,0,0.5);
+}
+.chat-item:hover { background: var(--text-dim); color: black; }
+
+/* СООБЩЕНИЯ */
+.messages-container {
+    flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px;
+    border: 1px solid var(--text-dim); margin-bottom: 10px; background: rgba(0,0,0,0.3);
+}
+
+.msg {
+    max-width: 80%; padding: 8px; border-radius: 4px; position: relative;
+    border-left: 3px solid var(--text-dim); font-size: 0.9rem;
+}
+.msg.my { align-self: flex-end; border-left: none; border-right: 3px solid var(--text-green); text-align: right; background: rgba(0, 50, 0, 0.4); }
+.msg.other { align-self: flex-start; background: rgba(50, 50, 50, 0.4); }
+
+.msg-meta { font-size: 0.6rem; opacity: 0.6; margin-top: 5px; display: flex; gap: 10px; justify-content: flex-end; }
+.msg-text { word-wrap: break-word; }
+
+/* КНОПКИ УПРАВЛЕНИЯ СООБЩЕНИЕМ */
+.msg-controls { font-size: 0.7rem; margin-right: 10px; cursor: pointer; letter-spacing: 3px; }
+.btn-edit:hover { color: yellow; }
+.btn-del:hover { color: red; }
+
+/* ПОЛЕ ВВОДА В ЧАТЕ */
+.msg-input-area { display: flex; gap: 10px; }
+.msg-input-area input { flex: 1; }
