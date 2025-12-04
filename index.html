@@ -64,11 +64,31 @@
                     <span id="user-display">БОЕЦ: UNKNOWN</span>
                     <button id="logout-btn" class="btn-small">ОТБОЙ</button>
                 </header>
+                <div class="search-panel">
+                    <input type="text" id="search-nick" placeholder="> ПОИСК ПОЗЫВНОГО..." class="terminal-input">
+                    <button id="btn-search" class="btn-small">СКАНИРОВАТЬ</button>
+                </div>
+                <div id="chats-container" class="scroll-zone"></div>
                 <div class="chat-list-empty">
                     <div class="radar-scan"></div>
                     <p>> ПОИСК АКТИВНЫХ КАНАЛОВ...</p>
                     <p>> НЕТ АКТИВНЫХ СОЕДИНЕНИЙ</p>
                 </div>
+            </div>
+
+            <div id="chat-screen" class="screen">
+                <header class="top-bar">
+                    <button id="back-btn" class="btn-small">< НАЗАД</button>
+                    <span id="chat-title">КАНАЛ: ---</span>
+                </header>
+    
+                <div id="messages-area" class="messages-container">
+                    </div>
+
+                <form id="msg-form" class="msg-input-area">
+                    <input type="text" id="msg-input" placeholder="ШИФРОВКА..." autocomplete="off">
+                    <button type="submit" class="btn-metal">ОТПРАВИТЬ</button>
+                </form>
             </div>
 
         </div>
