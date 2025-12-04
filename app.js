@@ -1,7 +1,5 @@
-// Import the functions you need from the SDKs you need
+// Import the functions from the SDKs
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-
-// 1. АВТОРИЗАЦИЯ (Только функции входа/выхода)
 import { 
     getAuth, 
     createUserWithEmailAndPassword, 
@@ -9,8 +7,6 @@ import {
     signOut, 
     onAuthStateChanged 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-
-// 2. БАЗА ДАННЫХ (Все функции для работы с чатами и сообщениями перенесены сюда)
 import { 
     getFirestore, 
     doc, 
@@ -20,16 +16,15 @@ import {
     where, 
     getDocs,
     getDoc,
-    addDoc,             // <-- Перенесено сюда
-    serverTimestamp,    // <-- Перенесено сюда
-    orderBy,            // <-- Перенесено сюда
-    onSnapshot,         // <-- Перенесено сюда
-    deleteDoc,          // <-- Перенесено сюда
-    updateDoc,          // <-- Перенесено сюда
-    arrayUnion          // <-- Перенесено сюда
+    addDoc,
+    serverTimestamp,
+    orderBy,
+    onSnapshot,
+    deleteDoc,
+    updateDoc
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-// --- КОНФИГУРАЦИЯ (ВСТАВЬ СВОИ ДАННЫЕ СЮДА) ---
+// --- КОНФИГУРАЦИЯ ---
 const firebaseConfig = {
   apiKey: "AIzaSyDa1-4bIIU_dcYe8z3UPpDj_aOAgLuKBjY",
   authDomain: "safezone-91a89.firebaseapp.com",
@@ -40,7 +35,6 @@ const firebaseConfig = {
   measurementId: "G-BSERQ5X1CF"
 };
 
-// Инициализация
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -48,64 +42,28 @@ const db = getFirestore(app);
 // Глобальные переменные
 let currentChatId = null;
 let unsubscribeMessages = null; 
-let unsubscribeChats = null; // Для отключения прослушки списка чатов
+let unsubscribeChats = null; 
 let currentUserData = null; 
 
 // --- DOM ЭЛЕМЕНТЫ ---
 const authScreen = document.getElementById('auth-screen');
 const hqScreen = document.getElementById('hq-screen');
-const chatScreen = document.getElementById('chat-screen'); // Добавил экран чата
+const chatScreen = document.getElementById('chat-screen');
 const loginForm = document.getElementById('login-form');
 const registerForm = document.getElementById('register-form');
 const errorLog = document.getElementById('error-log');
 const userDisplay = document.getElementById('user-display');
+const emptyState = document.getElementById('empty-state');
+const chatsContainer = document.getElementById('chats-container');
 
-// --- СИСТЕМА МОДАЛЬНЫХ ОКОН (ЗАМЕНА ALERT/PROMPT) ---
+// Модальные элементы
 const modalOverlay = document.getElementById('custom-modal');
 const modalMsg = document.getElementById('modal-msg');
 const modalInput = document.getElementById('modal-input-field');
 const modalBtnConfirm = document.getElementById('modal-btn-confirm');
 const modalBtnCancel = document.getElementById('modal-btn-cancel');
 
-// Функция вызывает окно и ждет ответа (Promise)
-function showModal(text, type = 'alert', placeholder = '') {
-    return new Promise((resolve) => {
-        // Настройка UI
-        modalMsg.innerText = text;
-        modalOverlay.classList.add('active');
-        
-        // Сброс полей
-        modalInput.value = '';
-        modalInput.style.display = type === 'prompt' ? 'block' : 'none';
-        if(type === 'prompt') modalInput.placeholder = placeholder;
-
-        modalBtnCancel.style.display = type === 'alert' ? 'none' : 'block';
-        modalBtnConfirm.innerText = type === 'alert' ? 'OK' : 'ПРИНЯТЬ';
-
-        // Обработчики кнопок (одноразовые)
-        const cleanup = () => {
-            modalOverlay.classList.remove('active');
-            modalBtnConfirm.removeEventListener('click', onConfirm);
-            modalBtnCancel.removeEventListener('click', onCancel);
-        };
-
-        const onConfirm = () => {
-            cleanup();
-            if (type === 'prompt') resolve(modalInput.value); // Возвращаем текст
-            else resolve(true); // Возвращаем "ДА"
-        };
-
-        const onCancel = () => {
-            cleanup();
-            resolve(null); // Возвращаем "Пусто/Отмена"
-        };
-
-        modalBtnConfirm.addEventListener('click', onConfirm);
-        modalBtnCancel.addEventListener('click', onCancel);
-    });
-}
-
-// Переключатели
+// --- УТИЛИТЫ ---
 document.getElementById('to-register').addEventListener('click', () => toggleForms(false));
 document.getElementById('to-login').addEventListener('click', () => toggleForms(true));
 document.getElementById('logout-btn').addEventListener('click', () => signOut(auth));
@@ -120,7 +78,42 @@ function logError(msg) {
     errorLog.innerText = `>>> ОШИБКА: ${msg}`;
 }
 
-// --- ЛОГИКА РЕГИСТРАЦИИ (ВЕРБОВКА) ---
+// --- СИСТЕМА МОДАЛЬНЫХ ОКОН ---
+function showModal(text, type = 'alert', placeholder = '') {
+    return new Promise((resolve) => {
+        modalMsg.innerText = text;
+        modalOverlay.classList.add('active');
+        
+        modalInput.value = '';
+        modalInput.style.display = type === 'prompt' ? 'block' : 'none';
+        if(type === 'prompt') modalInput.placeholder = placeholder;
+
+        modalBtnCancel.style.display = type === 'alert' ? 'none' : 'block';
+        modalBtnConfirm.innerText = type === 'alert' ? 'OK' : 'ПРИНЯТЬ';
+
+        const cleanup = () => {
+            modalOverlay.classList.remove('active');
+            modalBtnConfirm.removeEventListener('click', onConfirm);
+            modalBtnCancel.removeEventListener('click', onCancel);
+        };
+
+        const onConfirm = () => {
+            cleanup();
+            if (type === 'prompt') resolve(modalInput.value);
+            else resolve(true);
+        };
+
+        const onCancel = () => {
+            cleanup();
+            resolve(null);
+        };
+
+        modalBtnConfirm.addEventListener('click', onConfirm);
+        modalBtnCancel.addEventListener('click', onCancel);
+    });
+}
+
+// --- РЕГИСТРАЦИЯ ---
 registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const nickname = document.getElementById('reg-nick').value.trim();
@@ -132,40 +125,24 @@ registerForm.addEventListener('submit', async (e) => {
     if (nickname.length < 3) return logError("ПОЗЫВНОЙ СЛИШКОМ КОРОТКИЙ");
 
     try {
-        // 1. Проверка уникальности никнейма
         const q = query(collection(db, "users"), where("nickname", "==", nickname));
-        const querySnapshot = await getDocs(q);
+        const snap = await getDocs(q);
+        if (!snap.empty) throw new Error("ПОЗЫВНОЙ ЗАНЯТ");
+
+        const cred = await createUserWithEmailAndPassword(auth, email, pass);
+        const userData = { nickname, email, rank: "Recruit", createdAt: new Date() };
         
-        if (!querySnapshot.empty) {
-            throw new Error("ПОЗЫВНОЙ УЖЕ ЗАНЯТ ДРУГИМ БОЙЦОМ");
-        }
-
-        // 2. Создание аккаунта Auth
-        const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
-        const user = userCredential.user;
-
-        // 3. Запись в БД
-        const userData = {
-            nickname: nickname,
-            email: email,
-            rank: "Recruit",
-            createdAt: new Date()
-        };
-        
-        await setDoc(doc(db, "users", user.uid), userData);
-
-        // Принудительно обновляем локальные данные, чтобы не ждать onAuthStateChanged
-        currentUserData = { uid: user.uid, ...userData };
-        console.log("Боец завербован:", user.uid);
+        await setDoc(doc(db, "users", cred.user.uid), userData);
+        currentUserData = { uid: cred.user.uid, ...userData };
         
     } catch (error) {
         let msg = error.message;
-        if (msg.includes("email-already-in-use")) msg = "ЧАСТОТА (EMAIL) УЖЕ ИСПОЛЬЗУЕТСЯ";
+        if (msg.includes("email-already-in-use")) msg = "EMAIL ЗАНЯТ";
         logError(msg);
     }
 });
 
-// --- ЛОГИКА ВХОДА (КПП) ---
+// --- ВХОД ---
 loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const loginInput = document.getElementById('login-id').value.trim();
@@ -173,96 +150,68 @@ loginForm.addEventListener('submit', async (e) => {
 
     try {
         let emailToUse = loginInput;
-
-        // Вход по позывному
         if (!loginInput.includes('@')) {
             const q = query(collection(db, "users"), where("nickname", "==", loginInput));
-            const querySnapshot = await getDocs(q);
-
-            if (querySnapshot.empty) {
-                throw new Error("ПОЗЫВНОЙ НЕ НАЙДЕН В БАЗЕ ДАННЫХ");
-            }
-            
-            querySnapshot.forEach((doc) => {
-                emailToUse = doc.data().email;
-            });
+            const snap = await getDocs(q);
+            if (snap.empty) throw new Error("ПОЗЫВНОЙ НЕ НАЙДЕН");
+            emailToUse = snap.docs[0].data().email;
         }
-
         await signInWithEmailAndPassword(auth, emailToUse, password);
-
     } catch (error) {
-        logError("ДОСТУП ЗАПРЕЩЕН. ПРОВЕРЬТЕ ДАННЫЕ.");
-        console.error(error);
+        logError("ДОСТУП ЗАПРЕЩЕН");
     }
 });
 
-// --- СЛУШАТЕЛЬ СОСТОЯНИЯ (СМЕНА ЭКРАНОВ) ---
+// --- ГЛАВНЫЙ КОНТРОЛЛЕР ---
 onAuthStateChanged(auth, async (user) => {
     if (user) {
-        // 1. Боец вошел -> Показываем штаб
         authScreen.classList.remove('active');
         hqScreen.classList.add('active');
         
-        // 2. Загружаем данные профиля
-        // Если мы только что зарегистрировались, currentUserData может быть уже установлен вручную выше
         if (!currentUserData || currentUserData.uid !== user.uid) {
-            const userDocRef = doc(db, "users", user.uid);
-            const userDoc = await getDoc(userDocRef);
-
-            if (userDoc.exists()) {
-                currentUserData = { uid: user.uid, ...userDoc.data() };
-                userDisplay.innerText = `БОЕЦ: ${currentUserData.nickname}`;
-            } else {
-                // Если документ еще создается (гонка при регистрации), показываем email
-                userDisplay.innerText = `БОЕЦ: ${user.email}`;
-                // Можно добавить повторную попытку загрузки или слушатель, но для начала хватит этого
+            const snap = await getDoc(doc(db, "users", user.uid));
+            if (snap.exists()) {
+                currentUserData = { uid: user.uid, ...snap.data() };
             }
-        } else {
-            // Если данные уже есть (установили при регистрации)
-             userDisplay.innerText = `БОЕЦ: ${currentUserData.nickname}`;
         }
-
-        // 3. Загружаем чаты в любом случае
+        userDisplay.innerText = currentUserData ? `БОЕЦ: ${currentUserData.nickname}` : `ID: ${user.uid}`;
+        
         loadMyChats();
 
     } else {
-        // Боец вышел
         hqScreen.classList.remove('active');
-        chatScreen.classList.remove('active'); // Скрываем чат если был открыт
+        chatScreen.classList.remove('active');
         authScreen.classList.add('active');
-        
         loginForm.reset();
         currentUserData = null;
-        if (unsubscribeChats) unsubscribeChats(); // Отключаем прослушку чатов
+        if (unsubscribeChats) unsubscribeChats();
     }
 });
 
-// --- ФУНКЦИОНАЛ ЧАТОВ (ВСТАВЛЯЕМ СЮДА КОД ИЗ ПРЕДЫДУЩЕГО ОТВЕТА) ---
-
-// 1. Поиск
+// --- ПОИСК И СОЗДАНИЕ ЧАТА ---
 document.getElementById('btn-search').addEventListener('click', async () => {
     const targetNick = document.getElementById('search-nick').value.trim();
     if (!targetNick) return;
-    if (!currentUserData) return alert("ОШИБКА ДОСТУПА: ПРОФИЛЬ НЕ ЗАГРУЖЕН");
 
     const q = query(collection(db, "users"), where("nickname", "==", targetNick));
     const snap = await getDocs(q);
 
     if (snap.empty) {
-    await showModal("БОЕЦ НЕ ОБНАРУЖЕН В СЕКТОРЕ", 'alert'); // Было alert()
-    return;
+        await showModal("БОЕЦ НЕ ОБНАРУЖЕН", 'alert');
+        return;
     }
 
     const targetUser = snap.docs[0].data();
     const targetUid = snap.docs[0].id;
 
     if (targetUid === auth.currentUser.uid) {
-    await showModal("НЕЛЬЗЯ СВЯЗАТЬСЯ С САМИМ СОБОЙ", 'alert'); // Было alert()
-    return;
+        await showModal("САМОСТОЯТЕЛЬНАЯ СВЯЗЬ ЗАПРЕЩЕНА", 'alert');
+        return;
     }
 
     const chatDocId = [auth.currentUser.uid, targetUid].sort().join("_");
     
+    // Создаем или обновляем чат
     await setDoc(doc(db, "chats", chatDocId), {
         participants: [auth.currentUser.uid, targetUid],
         participantNames: [currentUserData.nickname, targetUser.nickname],
@@ -272,10 +221,11 @@ document.getElementById('btn-search').addEventListener('click', async () => {
     openChat(chatDocId, targetUser.nickname);
 });
 
-// 2. Список чатов
+// --- СПИСОК ЧАТОВ ---
 function loadMyChats() {
     if (!auth.currentUser) return;
-
+    
+    // ВНИМАНИЕ: Если чаты не грузятся, посмотри в консоль и нажми на ссылку для создания индекса!
     const q = query(
         collection(db, "chats"), 
         where("participants", "array-contains", auth.currentUser.uid),
@@ -283,31 +233,32 @@ function loadMyChats() {
     );
 
     unsubscribeChats = onSnapshot(q, (snapshot) => {
-        const container = document.getElementById('chats-container');
-        container.innerHTML = ''; 
+        chatsContainer.innerHTML = '';
         
         if (snapshot.empty) {
-            container.innerHTML = '<div class="chat-list-empty"><p>НЕТ АКТИВНЫХ СОЕДИНЕНИЙ</p></div>';
-            return;
+            emptyState.style.display = 'flex';
+        } else {
+            emptyState.style.display = 'none';
+            snapshot.forEach(docSnap => {
+                const data = docSnap.data();
+                const otherName = data.participantNames.find(n => n !== currentUserData.nickname) || "UNKNOWN";
+                
+                const el = document.createElement('div');
+                el.className = 'chat-item';
+                el.innerText = `>> СВЯЗЬ С: ${otherName}`;
+                el.onclick = () => openChat(docSnap.id, otherName);
+                chatsContainer.appendChild(el);
+            });
         }
-
-        snapshot.forEach(docSnap => {
-            const data = docSnap.data();
-            const otherName = data.participantNames.find(n => n !== currentUserData.nickname) || "UNKNOWN";
-            
-            const el = document.createElement('div');
-            el.className = 'chat-item';
-            el.innerText = `>> СВЯЗЬ С: ${otherName}`;
-            el.onclick = () => openChat(docSnap.id, otherName);
-            container.appendChild(el);
-        });
     }, (error) => {
-        console.log("Ждем индекс...", error);
-        // Если ошибка индекса - не пугаем пользователя
+        console.error("ОШИБКА ЗАГРУЗКИ ЧАТОВ:", error);
+        if(error.message.includes("index")) {
+            console.log("!!! СОЗДАТЕЛЬ, ТРЕБУЕТСЯ СОЗДАНИЕ ИНДЕКСА В FIREBASE. ССЫЛКА ВЫШЕ !!!");
+        }
     });
 }
 
-// 3. Открытие чата
+// --- ЧАТ ---
 function openChat(chatId, chatName) {
     currentChatId = chatId;
     hqScreen.classList.remove('active');
@@ -332,7 +283,6 @@ function openChat(chatId, chatName) {
     });
 }
 
-// 4. Кнопка НАЗАД
 document.getElementById('back-btn').addEventListener('click', () => {
     if (unsubscribeMessages) unsubscribeMessages(); 
     chatScreen.classList.remove('active');
@@ -340,7 +290,7 @@ document.getElementById('back-btn').addEventListener('click', () => {
     currentChatId = null;
 });
 
-// 5. Отправка сообщения
+// --- ОТПРАВКА СООБЩЕНИЙ ---
 document.getElementById('msg-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const input = document.getElementById('msg-input');
@@ -362,7 +312,7 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
     input.value = '';
 });
 
-// 6. Рендер сообщения
+// --- РЕНДЕР СООБЩЕНИЯ ---
 function renderMessage(docSnap) {
     const msg = docSnap.data();
     const div = document.createElement('div');
@@ -392,19 +342,16 @@ function renderMessage(docSnap) {
     document.getElementById('messages-area').appendChild(div);
 }
 
-// Глобальные функции
+// Глобальные функции для HTML onclick
 window.deleteMsg = async (chatId, msgId) => {
-    // Было: if(confirm(...))
-    const confirmed = await showModal("ПОДТВЕРДИТЕ УНИЧТОЖЕНИЕ СООБЩЕНИЯ", 'confirm');
+    const confirmed = await showModal("УНИЧТОЖИТЬ СООБЩЕНИЕ?", 'confirm');
     if(confirmed) {
         await deleteDoc(doc(db, "chats", chatId, "messages", msgId));
     }
 };
 
 window.editMsg = async (chatId, msgId, oldText) => {
-    // Было: const newText = prompt(...)
     const newText = await showModal("ВНЕСИТЕ КОРРЕКТИРОВКИ:", 'prompt', oldText);
-    
     if (newText && newText !== oldText) {
         await updateDoc(doc(db, "chats", chatId, "messages", msgId), {
             text: newText,
