@@ -80,20 +80,36 @@ h1 { font-size: 2rem; text-align: center; text-shadow: 0 0 10px var(--text-green
 .status { text-align: center; font-size: 0.8rem; border-bottom: 1px dashed var(--text-dim); padding-bottom: 10px; margin-bottom: 20px; }
 .military-title { font-size: 1rem; background: var(--text-dim); color: black; padding: 2px 5px; display: inline-block; margin-bottom: 15px; }
 
-/* ПОЛЯ ВВОДА */
-.input-group { margin-bottom: 15px; }
-label { display: block; font-size: 0.7rem; margin-bottom: 5px; opacity: 0.8; }
+/* ОБНОВЛЕННЫЕ ПОЛЯ ВВОДА */
 input {
     width: 100%;
-    background: #000;
+    background: #050505; /* Почти черный */
     border: 1px solid var(--text-dim);
+    border-left: 3px solid var(--text-dim); /* Военный стиль слева */
     color: var(--text-green);
-    padding: 10px;
-    font-family: inherit;
+    padding: 15px; /* Больше пространства внутри */
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 1rem; /* Крупный текст */
     box-sizing: border-box;
     outline: none;
+    transition: 0.3s;
 }
-input:focus { border-color: var(--text-green); box-shadow: 0 0 5px var(--text-dim); }
+input:focus {
+    background: #0a150a;
+    border-color: var(--text-green);
+    box-shadow: 0 0 10px rgba(51, 255, 51, 0.2);
+}
+
+/* Специально для чата, чтобы поле не плющилось */
+.msg-input-area {
+    display: flex;
+    gap: 10px;
+    padding-top: 10px;
+    height: 60px; /* Фиксированная высота блока ввода */
+}
+.msg-input-area input {
+    height: 100%; /* Растянуть на всю высоту */
+}
 
 /* КНОПКИ (МЕТАЛЛИЧЕСКИЕ) */
 .btn-metal {
@@ -178,3 +194,47 @@ input:focus { border-color: var(--text-green); box-shadow: 0 0 5px var(--text-di
 /* ПОЛЕ ВВОДА В ЧАТЕ */
 .msg-input-area { display: flex; gap: 10px; }
 .msg-input-area input { flex: 1; }
+
+/* --- СИСТЕМА УВЕДОМЛЕНИЙ (MODALS) --- */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.85); /* Затемнение фона */
+    display: none; /* Скрыто по умолчанию */
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    backdrop-filter: blur(2px);
+}
+.modal-overlay.active { display: flex; }
+
+.modal-box {
+    width: 350px;
+    background: #1a1a1a;
+    border: 2px solid var(--alert-red); /* Красная рамка тревоги */
+    box-shadow: 0 0 30px rgba(255, 0, 0, 0.2);
+    padding: 20px;
+    position: relative;
+    text-align: center;
+}
+/* Уголки для окна */
+.modal-box::before {
+    content: ''; position: absolute; top: -2px; left: -2px; width: 10px; height: 10px; background: var(--alert-red);
+}
+.modal-box::after {
+    content: ''; position: absolute; bottom: -2px; right: -2px; width: 10px; height: 10px; background: var(--alert-red);
+}
+
+.modal-title {
+    color: var(--alert-red);
+    border-bottom: 1px dashed var(--alert-red);
+    padding-bottom: 10px; margin-bottom: 15px;
+    font-weight: bold; letter-spacing: 2px;
+}
+
+.modal-text { margin-bottom: 20px; color: #fff; font-size: 0.9rem; }
+
+.modal-actions { display: flex; gap: 10px; justify-content: center; }
+
+/* Скрываем инпут в модалке, если он не нужен */
+#modal-input-field { display: none; margin-bottom: 20px; border-color: var(--alert-red); color: var(--alert-red); }
