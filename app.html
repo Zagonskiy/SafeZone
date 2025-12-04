@@ -1,1 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>SafeZone - Внутри</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="device-container" style="text-align: center;">
+        <h2>SafeZone</h2>
+        <p>Соединение установлено.</p>
+        <p>Канал безопасен.</p>
+        
+        <button id="btn-logout" style="background: linear-gradient(145deg, #d32f2f, #b71c1c);">Отключиться</button>
+    </div>
 
+    <script type="module">
+        import { auth, signOut, onAuthStateChanged } from "./firebase-config.js";
+
+        // Проверка: если не залогинен, выкидываем обратно
+        onAuthStateChanged(auth, (user) => {
+            if (!user) {
+                window.location.href = "index.html";
+            }
+        });
+
+        document.getElementById('btn-logout').addEventListener('click', () => {
+            signOut(auth).then(() => {
+                window.location.href = "index.html";
+            });
+        });
+    </script>
+</body>
+</html>
