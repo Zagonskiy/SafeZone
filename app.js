@@ -538,7 +538,12 @@ async function openChat(chatId, chatName) {
         const area = document.getElementById('messages-area');
         area.innerHTML = '';
         snap.forEach(renderMessage);
-        area.scrollTop = area.scrollHeight;
+        
+        // --- АВТО-СКРОЛЛ ВНИЗ (ОБНОВЛЕНО) ---
+        // Небольшая задержка (10мс) помогает браузеру успеть отрисовать картинки перед скроллом
+        setTimeout(() => {
+            area.scrollTop = area.scrollHeight;
+        }, 10);
     });
 }
 
