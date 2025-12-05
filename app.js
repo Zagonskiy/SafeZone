@@ -801,10 +801,6 @@ function renderMessage(docSnap) {
         audioWrapper.appendChild(audio);
         contentDiv.appendChild(audioWrapper);
         
-        const caption = document.createElement('div');
-        caption.innerText = "/// VOICE DATA ///";
-        caption.style.fontSize = "0.6rem"; caption.style.opacity = "0.5";
-        contentDiv.appendChild(caption);
 
     } else if (msg.imageBase64) {
         // 2. КАРТИНКА
