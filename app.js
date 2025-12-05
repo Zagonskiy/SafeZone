@@ -44,35 +44,37 @@ const searchInput = document.getElementById('search-nick');
 const searchIndicator = document.getElementById('search-indicator');
 const searchResultsArea = document.getElementById('search-results');
 const searchList = document.getElementById('search-list');
+const closeSearchBtn = document.getElementById('close-search'); // Если кнопки нет в HTML, переменная будет null, но это не страшно, если мы ее не используем
 
 // --- ЖИВОЙ ПОИСК (LIVE RADAR) ---
 let searchTimeout = null;
 
-searchInput.addEventListener('input', (e) => {
-    const text = e.target.value.trim();
+if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+        const text = e.target.value.trim();
 
-    // 1. Если пусто — скрываем результаты моментально
-    if (!text) {
-        searchResultsArea.style.display = 'none';
-        searchIndicator.classList.remove('active');
-        return;
-    }
+        // 1. Если пусто — скрываем результаты моментально
+        if (!text) {
+            searchResultsArea.style.display = 'none';
+            searchIndicator.classList.remove('active');
+            return;
+        }
 
-    // 2. Визуальный эффект "сканирования"
-    searchIndicator.classList.add('active');
-    searchResultsArea.style.display = 'block';
-    searchList.innerHTML = '<div style="padding:10px; opacity:0.5;">> СКАНИРОВАНИЕ...</div>';
+        // 2. Визуальный эффект "сканирования"
+        searchIndicator.classList.add('active');
+        searchResultsArea.style.display = 'block';
+        searchList.innerHTML = '<div style="padding:10px; opacity:0.5;">> СКАНИРОВАНИЕ...</div>';
 
-    // 3. Debounce (Задержка), чтобы не бомбить базу на каждой букве (ждем 300мс после ввода)
-    clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(() => executeSearch(text), 300);
-});
+        // 3. Debounce (Задержка), чтобы не бомбить базу на каждой букве (ждем 300мс после ввода)
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => executeSearch(text), 300);
+    });
+}
 
 // Функция выполнения запроса
 async function executeSearch(queryText) {
     try {
         // Firebase трюк для поиска "начинается с..."
-        // Ищем от queryText до queryText + специальный символ
         const endText = queryText + '\uf8ff';
 
         const q = query(
@@ -88,7 +90,12 @@ async function executeSearch(queryText) {
         
     } catch (error) {
         console.error("Radar Error:", error);
-        searchList.innerHTML = '<div style="padding:10px; color:red;">СБОЙ РАДАРА</div>';
+        // Если ошибка связана с индексом, покажем это
+        if(error.message.includes("index")) {
+            searchList.innerHTML = '<div style="padding:10px; color:red; font-size:0.7rem;">ТРЕБУЕТСЯ ИНДЕКС (СМ. КОНСОЛЬ)</div>';
+        } else {
+            searchList.innerHTML = '<div style="padding:10px; color:red;">СБОЙ РАДАРА</div>';
+        }
     } finally {
         searchIndicator.classList.remove('active');
     }
@@ -114,7 +121,6 @@ function renderSearchResults(snapshot) {
         count++;
         const item = document.createElement('div');
         item.className = 'search-item';
-        // Подсвечиваем совпадение (для красоты)
         item.innerHTML = `
             <span>${user.nickname}</span> 
             <span style="font-size:0.7rem; opacity:0.6; padding-top:2px;">[СВЯЗЬ]</span>
@@ -136,7 +142,7 @@ function renderSearchResults(snapshot) {
 
 // Клик вне поиска закрывает его (UX)
 document.addEventListener('click', (e) => {
-    if (!searchInput.contains(e.target) && !searchResultsArea.contains(e.target)) {
+    if (searchInput && !searchInput.contains(e.target) && !searchResultsArea.contains(e.target)) {
         searchResultsArea.style.display = 'none';
     }
 });
@@ -165,20 +171,12 @@ document.getElementById('to-login').addEventListener('click', () => {
 
 // Кнопка НАЗАД (Только для мобильных)
 document.getElementById('back-btn').addEventListener('click', () => {
-    // На мобиле скрываем правую панель
     chatPanel.classList.remove('open');
-    // Отписываемся от сообщений
     if (unsubscribeMessages) unsubscribeMessages();
     currentChatId = null;
     document.getElementById('msg-form').style.display = 'none';
     document.getElementById('chat-title').innerText = "КАНАЛ: НЕ ВЫБРАН";
     document.getElementById('messages-area').innerHTML = '<div class="no-chat-selected"><p>> СВЯЗЬ ПРЕРВАНА</p></div>';
-});
-
-// Закрытие поиска
-closeSearchBtn.addEventListener('click', () => {
-    searchResultsArea.style.display = 'none';
-    document.getElementById('search-nick').value = '';
 });
 
 // --- СИСТЕМА MODAL ---
@@ -209,7 +207,7 @@ function showModal(text, type = 'alert', placeholder = '') {
 onAuthStateChanged(auth, async (user) => {
     if (user) {
         authScreen.classList.remove('active');
-        appInterface.classList.remove('hidden'); // Показываем интерфейс приложения
+        appInterface.classList.remove('hidden'); 
         
         if (!currentUserData || currentUserData.uid !== user.uid) {
             const snap = await getDoc(doc(db, "users", user.uid));
@@ -224,7 +222,7 @@ onAuthStateChanged(auth, async (user) => {
     }
 });
 
-// --- ЛОГИКА АВТОРИЗАЦИИ (Login/Register) ---
+// --- ЛОГИКА АВТОРИЗАЦИИ ---
 document.getElementById('register-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const nick = document.getElementById('reg-nick').value.trim();
@@ -259,44 +257,6 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     } catch (err) { showModal("ОШИБКА ДОСТУПА", 'alert'); }
 });
 
-// --- ПОИСК (НОВАЯ ЛОГИКА) ---
-document.getElementById('btn-search').addEventListener('click', async () => {
-    const nick = document.getElementById('search-nick').value.trim();
-    if (!nick) return;
-
-    // Очистка и показ блока
-    searchList.innerHTML = '<div class="military-title small">СКАНИРОВАНИЕ...</div>';
-    searchResultsArea.style.display = 'block';
-
-    const q = query(collection(db, "users"), where("nickname", "==", nick));
-    const snap = await getDocs(q);
-
-    searchList.innerHTML = ''; // Очищаем статус
-
-    if (snap.empty) {
-        searchList.innerHTML = '<div style="text-align:center; padding:10px;">ЦЕЛЬ НЕ ОБНАРУЖЕНА</div>';
-        return;
-    }
-
-    // Вывод списка найденных
-    snap.forEach(docSnap => {
-        const user = docSnap.data();
-        const uid = docSnap.id;
-        
-        if (uid === auth.currentUser.uid) return; // Себя не показываем
-
-        const item = document.createElement('div');
-        item.className = 'search-item';
-        item.innerHTML = `<span>${user.nickname}</span> <span style="opacity:0.5">[СВЯЗАТЬСЯ]</span>`;
-        item.onclick = () => startChat(uid, user.nickname);
-        searchList.appendChild(item);
-    });
-
-    if (searchList.children.length === 0) {
-        searchList.innerHTML = '<div style="text-align:center; padding:10px;">ТОЛЬКО ВЫ</div>';
-    }
-});
-
 // Создание/Открытие чата (вызывается из списка поиска)
 async function startChat(targetUid, targetNick) {
     const chatDocId = [auth.currentUser.uid, targetUid].sort().join("_");
@@ -308,7 +268,7 @@ async function startChat(targetUid, targetNick) {
     }, { merge: true });
 
     searchResultsArea.style.display = 'none'; // Скрыть поиск
-    document.getElementById('search-nick').value = '';
+    if(searchInput) searchInput.value = '';
     openChat(chatDocId, targetNick);
 }
 
@@ -341,12 +301,10 @@ function loadMyChats() {
 function openChat(chatId, chatName) {
     currentChatId = chatId;
     
-    // UI обновления
     document.getElementById('chat-title').innerText = `КАНАЛ: ${chatName}`;
-    document.getElementById('msg-form').style.display = 'flex'; // Показать ввод
-    document.getElementById('messages-area').innerHTML = ''; // Очистить
+    document.getElementById('msg-form').style.display = 'flex'; 
+    document.getElementById('messages-area').innerHTML = ''; 
     
-    // Анимация для мобильных (выезд панели)
     chatPanel.classList.add('open');
 
     if (unsubscribeMessages) unsubscribeMessages();
