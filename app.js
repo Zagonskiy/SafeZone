@@ -39,6 +39,10 @@ const userDisplay = document.getElementById('user-display');
 const myMiniAvatar = document.getElementById('my-mini-avatar');
 const chatImgUpload = document.getElementById('chat-img-upload');
 const btnAttachImg = document.getElementById('btn-attach-img');
+const imageViewerModal = document.getElementById('image-viewer-modal');
+const fullImageView = document.getElementById('full-image-view');
+const imageCaptionView = document.getElementById('image-caption-view');
+const closeImageViewer = document.getElementById('close-image-viewer');
 
 const searchInput = document.getElementById('search-nick');
 const searchIndicator = document.getElementById('search-indicator');
@@ -519,6 +523,25 @@ btnAttachImg.addEventListener('click', () => {
     chatImgUpload.click();
 });
 
+// --- ФУНКЦИЯ ПРОСМОТРА ФОТО ---
+function viewImage(src, caption) {
+    fullImageView.src = src;
+    imageCaptionView.innerText = (caption && caption !== "[ФОТО]") ? caption : "";
+    imageViewerModal.classList.add('active');
+}
+
+// Закрытие просмотрщика
+closeImageViewer.addEventListener('click', () => {
+    imageViewerModal.classList.remove('active');
+});
+
+// Закрытие по клику на фон
+imageViewerModal.addEventListener('click', (e) => {
+    if (e.target === imageViewerModal) {
+        imageViewerModal.classList.remove('active');
+    }
+});
+
 // --- ЛОГИКА ОТПРАВКИ ФОТО С ПРЕДПРОСМОТРОМ ---
 const photoModal = document.getElementById('photo-preview-modal');
 const photoPreviewImg = document.getElementById('photo-preview-img');
@@ -641,7 +664,22 @@ function renderMessage(docSnap) {
         const img = document.createElement('img');
         img.src = msg.imageBase64;
         img.className = 'msg-image-content';
-        img.onclick = () => { const win = window.open(); win.document.write('<img src="' + msg.imageBase64 + '" style="width:100%">'); };
+        if (msg.imageBase64) {
+        const img = document.createElement('img');
+        img.src = msg.imageBase64;
+        img.className = 'msg-image-content';
+        
+        // НОВОЕ: Открываем наш красивый модальник
+        img.onclick = () => viewImage(msg.imageBase64, msg.text);
+        
+        contentDiv.appendChild(img);
+        
+        if(msg.text && msg.text !== "[ФОТО]") {
+            const caption = document.createElement('div');
+            caption.innerText = msg.text; caption.style.marginTop = "5px";
+            contentDiv.appendChild(caption);
+        }
+    }
         contentDiv.appendChild(img);
         if(msg.text && msg.text !== "[ФОТО]") {
             const caption = document.createElement('div');
