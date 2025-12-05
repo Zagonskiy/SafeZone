@@ -37,6 +37,8 @@ const appInterface = document.getElementById('app-interface');
 const chatPanel = document.getElementById('chat-screen');
 const userDisplay = document.getElementById('user-display');
 const myMiniAvatar = document.getElementById('my-mini-avatar');
+const chatImgUpload = document.getElementById('chat-img-upload');
+const btnAttachImg = document.getElementById('btn-attach-img');
 
 const searchInput = document.getElementById('search-nick');
 const searchIndicator = document.getElementById('search-indicator');
@@ -119,6 +121,43 @@ function compressImage(file) {
                 // Сжимаем в JPEG с качеством 0.7
                 const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
                 resolve(dataUrl);
+            };
+            img.onerror = (err) => reject(err);
+        };
+    });
+}
+
+// Сжатие фото для чата (до 600px)
+function compressChatImage(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const MAX_SIZE = 600; // Разрешаем фото побольше
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                    if (width > MAX_SIZE) {
+                        height *= MAX_SIZE / width;
+                        width = MAX_SIZE;
+                    }
+                } else {
+                    if (height > MAX_SIZE) {
+                        width *= MAX_SIZE / height;
+                        height = MAX_SIZE;
+                    }
+                }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0, width, height);
+                // Качество 0.6 чтобы пролезло в базу
+                resolve(canvas.toDataURL("image/jpeg", 0.6));
             };
             img.onerror = (err) => reject(err);
         };
@@ -503,6 +542,44 @@ async function openChat(chatId, chatName) {
     });
 }
 
+// Клик по плюсику -> открываем выбор файла
+btnAttachImg.addEventListener('click', () => {
+    chatImgUpload.value = ''; // Сброс, чтобы можно было выбрать тот же файл
+    chatImgUpload.click();
+});
+
+// Когда файл выбран
+chatImgUpload.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Спрашиваем подтверждение (защита от мисклика)
+    const confirmed = await showModal("ОТПРАВИТЬ ФОТОГРАФИЮ?", "confirm");
+    if (!confirmed) return;
+
+    try {
+        // Сжимаем
+        const base64 = await compressChatImage(file);
+        
+        // Отправляем как сообщение
+        await addDoc(collection(db, "chats", currentChatId, "messages"), {
+            text: "[ФОТО]", // Текстовая заглушка
+            imageBase64: base64, // Само фото
+            senderId: auth.currentUser.uid, 
+            senderNick: currentUserData.nickname,
+            senderAvatar: currentUserData.avatarBase64 || null,
+            createdAt: serverTimestamp(), 
+            edited: false
+        });
+        
+        await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
+        
+    } catch (err) {
+        console.error(err);
+        showModal("ОШИБКА: ФАЙЛ СЛИШКОМ БОЛЬШОЙ", "alert");
+    }
+});
+
 document.getElementById('msg-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const input = document.getElementById('msg-input');
@@ -521,45 +598,34 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
     input.value = '';
 });
 
-// --- РЕНДЕР СООБЩЕНИЯ (ИСПРАВЛЕНО) ---
 function renderMessage(docSnap) {
     const msg = docSnap.data();
     const isMine = msg.senderId === auth.currentUser.uid;
     
-    // Контейнер строки
     const row = document.createElement('div');
     row.className = `msg-row ${isMine ? 'my' : 'other'}`;
 
-    // АВАТАРКА (Только для чужих сообщений)
+    // АВАТАРКА (для чужих)
     if (!isMine) {
         const avatar = document.createElement('img');
         avatar.className = 'chat-avatar';
-        
-        // Логика выбора фото:
-        // 1. Если мы скачали актуальное фото при входе в чат -> ставим его
-        // 2. Если нет, но оно сохранено в сообщении -> ставим его
-        // 3. Иначе -> ставим заглушку
-        
         if (currentChatPartnerAvatar) {
             avatar.src = currentChatPartnerAvatar;
         } else if (msg.senderAvatar) {
             avatar.src = msg.senderAvatar;
         } else {
-            // Пустой серый круг
             avatar.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; 
             avatar.style.backgroundColor = '#333';
         }
-        
-        // Клик -> Открыть профиль
         avatar.onclick = () => openProfile(msg.senderId, false);
         row.appendChild(avatar);
     }
 
-    // Блок сообщения
+    // ТЕЛО СООБЩЕНИЯ
     const div = document.createElement('div');
     div.className = `msg ${isMine ? 'my' : 'other'}`;
     
-    // Имя над сообщением (для чужих)
+    // Имя (для чужих)
     if (!isMine) {
         const nickSpan = document.createElement('div');
         nickSpan.innerText = msg.senderNick;
@@ -571,27 +637,52 @@ function renderMessage(docSnap) {
         div.appendChild(nickSpan);
     }
 
-    const textDiv = document.createElement('div');
-    textDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
+    // --- ЛОГИКА ОТОБРАЖЕНИЯ КОНТЕНТА ---
+    const contentDiv = document.createElement('div');
     
+    if (msg.imageBase64) {
+        // Если это картинка
+        const img = document.createElement('img');
+        img.src = msg.imageBase64;
+        img.className = 'msg-image-content';
+        // Клик по картинке открывает её на весь экран (можно использовать showModal для просмотра)
+        img.onclick = () => {
+            // Простое открытие в новой вкладке для просмотра
+            const win = window.open();
+            win.document.write('<img src="' + msg.imageBase64 + '" style="width:100%">');
+        };
+        contentDiv.appendChild(img);
+        
+        // Если есть подпись к фото (на будущее)
+        if(msg.text && msg.text !== "[ФОТО]") {
+            const caption = document.createElement('div');
+            caption.innerText = msg.text;
+            caption.style.marginTop = "5px";
+            contentDiv.appendChild(caption);
+        }
+    } else {
+        // Если просто текст
+        contentDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
+    }
+    
+    div.appendChild(contentDiv);
+    // -----------------------------------
+
     const metaDiv = document.createElement('div');
     metaDiv.className = 'msg-meta';
     
-    // Кнопки управления (только для своих)
     if (isMine) {
-        const editBtn = document.createElement('span');
-        editBtn.innerText = '[E]'; 
-        editBtn.style.cursor = 'pointer'; 
-        editBtn.style.marginRight = '8px';
-        editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
+        // Фото редактировать нельзя, только текст
+        if (!msg.imageBase64) {
+            const editBtn = document.createElement('span');
+            editBtn.innerText = '[E]'; editBtn.style.cursor = 'pointer'; editBtn.style.marginRight = '8px';
+            editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
+            metaDiv.appendChild(editBtn);
+        }
 
         const delBtn = document.createElement('span');
-        delBtn.innerText = '[X]'; 
-        delBtn.style.cursor = 'pointer'; 
-        delBtn.style.marginRight = '8px';
+        delBtn.innerText = '[X]'; delBtn.style.cursor = 'pointer'; delBtn.style.marginRight = '8px';
         delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id);
-
-        metaDiv.appendChild(editBtn);
         metaDiv.appendChild(delBtn);
     }
 
@@ -600,9 +691,7 @@ function renderMessage(docSnap) {
     timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
     
     metaDiv.appendChild(timeSpan);
-    div.appendChild(textDiv);
     div.appendChild(metaDiv);
-    
     row.appendChild(div);
     
     document.getElementById('messages-area').appendChild(row);
