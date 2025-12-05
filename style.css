@@ -175,7 +175,19 @@ textarea.terminal-textarea { height: 80px; resize: none; }
     padding: 10px 5px; /* Немного воздуха */
 }
 .msg-input-area input { border: none; height: 50px; }
-.btn-send { width: 60px; margin: 0; border: none; border-left: 1px solid var(--text-dim); height: 50px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;}
+.btn-send {
+    width: 60px;
+    margin: 0;
+    border: none;
+    border-left: 1px solid var(--text-dim);
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    padding: 0;
+    background: #111; /* Темный фон */
+}
 
 /* ПОИСК */
 .search-panel { position: relative; margin-bottom: 0; z-index: 1000; }
@@ -400,19 +412,36 @@ textarea.terminal-textarea { height: 80px; resize: none; }
     height: 50px;
 }
 
-/* Панель записи (перекрывает ввод) */
-.recording-ui {
+/* ОВЕРЛЕЙ ЗАПИСИ (Появляется по центру при зажатии) */
+.recording-overlay {
     position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: #1a0505; /* Красноватый фон тревоги */
+    bottom: 80px; /* Чуть выше поля ввода */
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(20, 0, 0, 0.9);
+    border: 2px solid var(--alert-red);
+    padding: 15px 30px;
+    border-radius: 30px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 0 10px;
-    z-index: 10;
-    border-top: 1px solid var(--alert-red);
+    gap: 15px;
+    z-index: 6000;
+    box-shadow: 0 0 20px rgba(255, 0, 0, 0.4);
 }
 
+.rec-dot-large {
+    width: 15px;
+    height: 15px;
+    background-color: var(--alert-red);
+    border-radius: 50%;
+    animation: pulse 0.8s infinite;
+}
+
+#rec-status-text {
+    color: #fff;
+    font-weight: bold;
+    letter-spacing: 2px;
+}
 /* Таймер и точка */
 .rec-indicator { display: flex; align-items: center; gap: 10px; color: var(--alert-red); font-weight: bold; font-family: monospace; font-size: 1.2rem; }
 .rec-dot { width: 12px; height: 12px; background: var(--alert-red); border-radius: 50%; animation: pulse 1s infinite; }
