@@ -4,7 +4,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { 
     getFirestore, doc, setDoc, collection, query, where, getDocs, getDoc,
-    addDoc, serverTimestamp, orderBy, onSnapshot, deleteDoc, updateDoc, limit
+    addDoc, serverTimestamp, orderBy, onSnapshot, deleteDoc, updateDoc, limit, arrayRemove, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // --- КОНФИГУРАЦИЯ ---
@@ -188,7 +188,10 @@ const startRecording = async (e) => {
                         edited: false,
                         read: false
                     });
-                    await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
+                    await updateDoc(doc(db, "chats", currentChatId), { 
+                        lastUpdated: serverTimestamp(),
+                        hiddenFor: [] // Очищаем список скрытых, чтобы чат появился у всех участников
+                    });
                 } catch (e) {
                     console.error(e);
                     showModal("СБОЙ ОТПРАВКИ", "alert");
@@ -500,30 +503,63 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     } catch (err) { showModal("ОШИБКА ДОСТУПА", 'alert'); }
 });
 
+// --- СПИСОК ЧАТОВ (С УДАЛЕНИЕМ) ---
 function loadMyChats() {
     if (!auth.currentUser) return;
-    const q = query(collection(db, "chats"), where("participants", "array-contains", auth.currentUser.uid), orderBy("lastUpdated", "desc"));
+    
+    const q = query(
+        collection(db, "chats"), 
+        where("participants", "array-contains", auth.currentUser.uid),
+        orderBy("lastUpdated", "desc")
+    );
+    
     unsubscribeChats = onSnapshot(q, (snap) => {
-        const container = document.getElementById('chats-container'); container.innerHTML = '';
-        if (snap.empty) { document.getElementById('empty-state').style.display = 'flex'; } 
-        else {
+        const container = document.getElementById('chats-container');
+        container.innerHTML = '';
+        
+        // Фильтруем чаты, которые мы скрыли "только для себя"
+        const visibleChats = snap.docs.filter(doc => {
+            const data = doc.data();
+            return !data.hiddenFor || !data.hiddenFor.includes(auth.currentUser.uid);
+        });
+
+        if (visibleChats.length === 0) {
+            document.getElementById('empty-state').style.display = 'flex';
+        } else {
             document.getElementById('empty-state').style.display = 'none';
-            snap.forEach(async docSnap => {
+            
+            visibleChats.forEach(async docSnap => {
                 const data = docSnap.data();
                 const otherUid = data.participants.find(uid => uid !== auth.currentUser.uid);
                 const otherName = data.participantNames.find(n => n !== currentUserData.nickname) || "UNKNOWN";
+                
                 const el = document.createElement('div');
-                el.className = 'chat-item'; const imgId = `avatar-chat-${docSnap.id}`;
-                el.innerHTML = `<img id="${imgId}" src="" class="chat-list-avatar" style="display:none"><div>${otherName}</div>`;
+                el.className = 'chat-item'; 
+                const imgId = `avatar-chat-${docSnap.id}`;
+                
+                // HTML: Аватар + Имя + КНОПКА УДАЛЕНИЯ (Мусорка)
+                el.innerHTML = `
+                    <img id="${imgId}" src="" class="chat-list-avatar" style="display:none">
+                    <div style="flex:1;">${otherName}</div>
+                    <button class="btn-trash" onclick="event.stopPropagation(); confirmDeleteChat('${docSnap.id}')">×</button>
+                `;
+                
+                // Клик по блоку -> открыть чат
                 el.onclick = () => openChat(docSnap.id, otherName);
                 container.appendChild(el);
+
+                // Загрузка аватарки (как и было)
                 if (otherUid) {
                     const userSnap = await getDoc(doc(db, "users", otherUid));
                     if (userSnap.exists()) {
                         const uData = userSnap.data();
                         const imgEl = document.getElementById(imgId);
-                        if (imgEl && uData.avatarBase64) { imgEl.src = uData.avatarBase64; imgEl.style.display = 'block'; } 
-                        else if (imgEl) { imgEl.style.display = 'block'; imgEl.style.backgroundColor = '#222'; imgEl.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; }
+                        if (imgEl && uData.avatarBase64) {
+                            imgEl.src = uData.avatarBase64; imgEl.style.display = 'block';
+                        } else if (imgEl) {
+                             imgEl.style.display = 'block'; imgEl.style.backgroundColor = '#222'; 
+                             imgEl.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+                        }
                     }
                 }
             });
@@ -576,7 +612,10 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
         text, senderId: auth.currentUser.uid, senderNick: currentUserData.nickname,
         senderAvatar: currentUserData.avatarBase64 || null, createdAt: serverTimestamp(), edited: false, read: false
     });
-    await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
+    await updateDoc(doc(db, "chats", currentChatId), { 
+        lastUpdated: serverTimestamp(),
+        hiddenFor: [] // Очищаем список скрытых, чтобы чат появился у всех участников
+    });
     msgInput.value = '';
     // Возвращаем кнопку микрофона
     btnSendText.style.display = 'none';
@@ -621,7 +660,10 @@ btnConfirmPhoto.addEventListener('click', async () => {
             senderAvatar: currentUserData.avatarBase64 || null,
             createdAt: serverTimestamp(), edited: false, read: false
         });
-        await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
+        await updateDoc(doc(db, "chats", currentChatId), { 
+            lastUpdated: serverTimestamp(),
+            hiddenFor: [] // Очищаем список скрытых, чтобы чат появился у всех участников
+        });
         photoModal.classList.remove('active'); chatImgUpload.value=''; selectedFile = null;
     } catch(e) { alert("ОШИБКА"); } finally { btnConfirmPhoto.innerText = "ОТПРАВИТЬ"; btnConfirmPhoto.disabled = false; }
 });
@@ -721,3 +763,65 @@ window.editMsg = async (cId, mId, old) => {
     const val = await showModal('ИЗМЕНИТЬ:', 'prompt', old);
     if (val && val !== old) await updateDoc(doc(db, "chats", cId, "messages", mId), { text: val, edited: true });
 };
+
+// ==========================================
+// === ЛИКВИДАЦИЯ ЧАТОВ ===
+// ==========================================
+const deleteChatModal = document.getElementById('delete-chat-modal');
+let chatToDeleteId = null;
+
+// Вызывается из HTML (кнопка мусорки)
+window.confirmDeleteChat = (chatId) => {
+    chatToDeleteId = chatId;
+    deleteChatModal.classList.add('active');
+};
+
+// 1. ОТМЕНА
+document.getElementById('btn-del-cancel').addEventListener('click', () => {
+    deleteChatModal.classList.remove('active');
+    chatToDeleteId = null;
+});
+
+// 2. ТОЛЬКО ДЛЯ МЕНЯ (Скрыть)
+document.getElementById('btn-del-me').addEventListener('click', async () => {
+    if (!chatToDeleteId) return;
+    try {
+        // Добавляем мой ID в массив hiddenFor
+        await updateDoc(doc(db, "chats", chatToDeleteId), {
+            hiddenFor: arrayUnion(auth.currentUser.uid)
+        });
+        deleteChatModal.classList.remove('active');
+    } catch (e) {
+        alert("ОШИБКА: " + e.message);
+    }
+});
+
+// 3. УНИЧТОЖИТЬ ДЛЯ ВСЕХ
+document.getElementById('btn-del-all').addEventListener('click', async () => {
+    if (!chatToDeleteId) return;
+    if (!confirm("ВЫ УВЕРЕНЫ? ЭТО НЕОБРАТИМО.")) return;
+
+    try {
+        const chatRef = doc(db, "chats", chatToDeleteId);
+        
+        // Сначала удаляем все сообщения внутри (иначе они зависнут в базе призраками)
+        const msgsQ = query(collection(db, "chats", chatToDeleteId, "messages"));
+        const msgsSnap = await getDocs(msgsQ);
+        
+        // Удаляем сообщения по одному (Batch был бы лучше, но так проще для понимания)
+        const deletePromises = msgsSnap.docs.map(d => deleteDoc(d.ref));
+        await Promise.all(deletePromises);
+
+        // Удаляем сам документ чата
+        await deleteDoc(chatRef);
+        
+        // Если этот чат был открыт - закрываем его
+        if (currentChatId === chatToDeleteId) {
+            document.getElementById('back-btn').click(); // Имитируем нажатие "Назад"
+        }
+
+        deleteChatModal.classList.remove('active');
+    } catch (e) {
+        alert("ОШИБКА УДАЛЕНИЯ: " + e.message);
+    }
+});
