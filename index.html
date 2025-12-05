@@ -187,5 +187,18 @@
         <img class="modal-content-img" id="full-image-view">
         <div id="image-caption-view" class="caption-text"></div>
     </div>
+
+    <div id="delete-chat-modal" class="modal-overlay" style="z-index: 25000;">
+        <div class="modal-box">
+            <div class="modal-title" style="color: var(--alert-red); border-color: var(--alert-red);">/// ЛИКВИДАЦИЯ КАНАЛА ///</div>
+            <p class="modal-text">ВЫБЕРИТЕ МЕТОД ЗАЧИСТКИ:</p>
+            
+            <div class="modal-actions" style="flex-direction: column; gap: 10px;">
+                <button id="btn-del-me" class="btn-metal">ТОЛЬКО У МЕНЯ (СКРЫТЬ)</button>
+                <button id="btn-del-all" class="btn-metal danger">УНИЧТОЖИТЬ ДЛЯ ВСЕХ</button>
+                <button id="btn-del-cancel" class="btn-small">ОТМЕНА</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
