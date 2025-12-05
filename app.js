@@ -624,7 +624,6 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
     input.value = '';
 });
 
-// РЕНДЕР СООБЩЕНИЙ
 function renderMessage(docSnap) {
     const msg = docSnap.data();
     const isMine = msg.senderId === auth.currentUser.uid;
@@ -632,6 +631,7 @@ function renderMessage(docSnap) {
     const row = document.createElement('div');
     row.className = `msg-row ${isMine ? 'my' : 'other'}`;
 
+    // АВАТАРКА (для чужих)
     if (!isMine) {
         const avatar = document.createElement('img');
         avatar.className = 'chat-avatar';
@@ -647,86 +647,99 @@ function renderMessage(docSnap) {
         row.appendChild(avatar);
     }
 
+    // БЛОК СООБЩЕНИЯ
     const div = document.createElement('div');
     div.className = `msg ${isMine ? 'my' : 'other'}`;
     
+    // Имя (для чужих)
     if (!isMine) {
         const nickSpan = document.createElement('div');
         nickSpan.innerText = msg.senderNick;
-        nickSpan.style.fontSize = '0.7rem'; nickSpan.style.marginBottom = '2px';
-        nickSpan.style.color = '#888'; nickSpan.style.cursor = 'pointer';
+        nickSpan.style.fontSize = '0.7rem'; 
+        nickSpan.style.marginBottom = '2px';
+        nickSpan.style.color = '#888'; 
+        nickSpan.style.cursor = 'pointer';
         nickSpan.onclick = () => openProfile(msg.senderId, false);
         div.appendChild(nickSpan);
     }
 
+    // --- КОНТЕНТ (ИСПРАВЛЕНО: УБРАНО ДУБЛИРОВАНИЕ) ---
     const contentDiv = document.createElement('div');
+    
     if (msg.imageBase64) {
-        const img = document.createElement('img');
-        img.src = msg.imageBase64;
-        img.className = 'msg-image-content';
-        if (msg.imageBase64) {
+        // Если это КАРТИНКА
         const img = document.createElement('img');
         img.src = msg.imageBase64;
         img.className = 'msg-image-content';
         
-        // НОВОЕ: Открываем наш красивый модальник
+        // При клике вызываем просмотрщик
         img.onclick = () => viewImage(msg.imageBase64, msg.text);
         
         contentDiv.appendChild(img);
         
+        // Подпись к фото
         if(msg.text && msg.text !== "[ФОТО]") {
             const caption = document.createElement('div');
-            caption.innerText = msg.text; caption.style.marginTop = "5px";
-            contentDiv.appendChild(caption);
-        }
-    }
-        contentDiv.appendChild(img);
-        if(msg.text && msg.text !== "[ФОТО]") {
-            const caption = document.createElement('div');
-            caption.innerText = msg.text; caption.style.marginTop = "5px";
+            caption.innerText = msg.text; 
+            caption.style.marginTop = "5px";
             contentDiv.appendChild(caption);
         }
     } else {
+        // Если это ТЕКСТ
         contentDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
     }
     div.appendChild(contentDiv);
+    // --------------------------------------------------
 
     const metaDiv = document.createElement('div');
     metaDiv.className = 'msg-meta';
     
-    if (isMine && !msg.imageBase64) {
+    // Кнопки управления (свои)
+    // Разрешаем редактировать текст, даже если это подпись к фото
+    if (isMine) {
         const editBtn = document.createElement('span');
-        editBtn.innerText = '[E]'; editBtn.style.cursor = 'pointer'; editBtn.style.marginRight = '5px';
+        editBtn.innerText = '[E]'; 
+        editBtn.style.cursor = 'pointer'; 
+        editBtn.style.marginRight = '5px';
         editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
         metaDiv.appendChild(editBtn);
     }
     if (isMine) {
         const delBtn = document.createElement('span');
-        delBtn.innerText = '[X]'; delBtn.style.cursor = 'pointer'; delBtn.style.marginRight = '5px';
+        delBtn.innerText = '[X]'; 
+        delBtn.style.cursor = 'pointer'; 
+        delBtn.style.marginRight = '5px';
         delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id);
         metaDiv.appendChild(delBtn);
     }
 
+    // Время
     const timeSpan = document.createElement('span');
     const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
     timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
     metaDiv.appendChild(timeSpan);
 
+    // Статусы (галочки)
     if (isMine) {
         const statusSpan = document.createElement('span');
         statusSpan.className = 'msg-status';
+        
         if (docSnap.metadata.hasPendingWrites) {
-            statusSpan.innerHTML = '🕒'; statusSpan.className += ' status-wait';
+            statusSpan.innerHTML = '🕒'; 
+            statusSpan.className += ' status-wait';
         } else if (msg.read) {
-            statusSpan.innerHTML = '✓✓'; statusSpan.className += ' status-read';
+            statusSpan.innerHTML = '✓✓'; 
+            statusSpan.className += ' status-read';
         } else {
-            statusSpan.innerHTML = '✓'; statusSpan.className += ' status-sent';
+            statusSpan.innerHTML = '✓'; 
+            statusSpan.className += ' status-sent';
         }
         metaDiv.appendChild(statusSpan);
     }
 
     div.appendChild(metaDiv);
     row.appendChild(div);
+    
     document.getElementById('messages-area').appendChild(row);
 }
 
