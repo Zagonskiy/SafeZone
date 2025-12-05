@@ -168,3 +168,47 @@ textarea.terminal-textarea { height: 80px; resize: none; }
     ::-webkit-scrollbar-thumb { background: #333; }
     ::-webkit-scrollbar-track { background: #000; }
 }
+
+/* --- СТИЛЬ СПИСКА ЧАТОВ (ПРЯМОУГОЛЬНИКИ) --- */
+
+.chat-item {
+    /* Делаем прямоугольник с рамкой */
+    display: flex;
+    align-items: center; /* Центровка текста и фото по вертикали */
+    gap: 15px; /* Расстояние от фото до текста */
+    
+    border: 1px solid var(--text-dim);
+    border-left: 5px solid var(--text-dim); /* Жирная полоса слева */
+    background: rgba(0, 20, 0, 0.3); /* Темно-зеленый фон */
+    
+    padding: 15px; /* Внутренний отступ (объем) */
+    margin-bottom: 10px; /* Отступ снизу */
+    width: 100%;
+    box-sizing: border-box; /* Чтобы padding не ломал ширину */
+    
+    cursor: pointer;
+    transition: all 0.2s ease;
+    
+    /* Текст */
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: var(--text-green);
+    text-transform: uppercase;
+}
+
+.chat-item:hover {
+    background: var(--text-dim); /* При наведении заливаем цветом */
+    color: #000; /* Текст чернеет */
+    box-shadow: 0 0 15px var(--text-dim); /* Свечение */
+}
+
+/* Круглая аватарка внутри списка */
+.chat-list-avatar {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    border: 2px solid var(--text-green);
+    object-fit: cover; /* Чтобы фото не сплющило */
+    background: #111; /* Фон, пока грузится */
+    flex-shrink: 0; /* Чтобы аватарка не сжималась */
+}
