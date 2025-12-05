@@ -68,16 +68,15 @@
                     </header>
                     
                     <div class="search-panel">
-                        <input type="text" id="search-nick" placeholder="> ПОИСК ПОЗЫВНОГО..." class="terminal-input">
-                        <button id="btn-search" class="btn-small">SCAN</button>
+                        <div class="input-wrapper">
+                            <input type="text" id="search-nick" placeholder="> ПОИСК ЦЕЛИ..." class="terminal-input" autocomplete="off">
+                            <div id="search-indicator" class="typing-indicator"></div>
+                        </div>
                     </div>
 
                     <div id="search-results" class="search-results-area" style="display: none;">
-                        <div class="military-title small">/// РЕЗУЛЬТАТЫ СКАНИРОВАНИЯ ///</div>
                         <div id="search-list"></div>
-                        <button id="close-search" class="btn-small full-width">ЗАКРЫТЬ ПОИСК</button>
                     </div>
-
                     <div id="chats-container" class="scroll-zone"></div>
                     
                     <div id="empty-state" class="chat-list-empty" style="display: none;">
