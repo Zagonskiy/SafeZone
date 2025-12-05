@@ -2,13 +2,13 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>SafeZone | Secure Terminal</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <div class="device-case">
+    <div class="device-case" id="main-case">
         <div class="screw tl"></div><div class="screw tr"></div>
         <div class="screw bl"></div><div class="screw br"></div>
 
@@ -59,41 +59,52 @@
                 <div id="error-log" class="console-output"></div>
             </div>
 
-            <div id="hq-screen" class="screen">
-                <header class="top-bar">
-                    <span id="user-display">БОЕЦ: UNKNOWN</span>
-                    <button id="logout-btn" class="btn-small">ОТБОЙ</button>
-                </header>
+            <div id="app-interface" class="app-interface hidden">
                 
-                <div class="search-panel">
-                    <input type="text" id="search-nick" placeholder="> ПОИСК ПОЗЫВНОГО..." class="terminal-input">
-                    <button id="btn-search" class="btn-small">СКАНИРОВАТЬ</button>
+                <div id="hq-screen" class="screen-panel side-panel">
+                    <header class="top-bar">
+                        <span id="user-display">БОЕЦ: UNKNOWN</span>
+                        <button id="logout-btn" class="btn-small">ОТБОЙ</button>
+                    </header>
+                    
+                    <div class="search-panel">
+                        <input type="text" id="search-nick" placeholder="> ПОИСК ПОЗЫВНОГО..." class="terminal-input">
+                        <button id="btn-search" class="btn-small">SCAN</button>
+                    </div>
+
+                    <div id="search-results" class="search-results-area" style="display: none;">
+                        <div class="military-title small">/// РЕЗУЛЬТАТЫ СКАНИРОВАНИЯ ///</div>
+                        <div id="search-list"></div>
+                        <button id="close-search" class="btn-small full-width">ЗАКРЫТЬ ПОИСК</button>
+                    </div>
+
+                    <div id="chats-container" class="scroll-zone"></div>
+                    
+                    <div id="empty-state" class="chat-list-empty" style="display: none;">
+                        <div class="radar-scan"></div>
+                        <p>> ЖДУ СИГНАЛА...</p>
+                    </div>
                 </div>
 
-                <div id="chats-container" class="scroll-zone"></div>
-                
-                <div id="empty-state" class="chat-list-empty" style="display: none;">
-                    <div class="radar-scan"></div>
-                    <p>> ПОИСК АКТИВНЫХ КАНАЛОВ...</p>
-                    <p>> НЕТ АКТИВНЫХ СОЕДИНЕНИЙ</p>
+                <div id="chat-screen" class="screen-panel main-panel">
+                    <header class="top-bar chat-header">
+                        <button id="back-btn" class="btn-small mobile-only">< НАЗАД</button>
+                        <span id="chat-title">КАНАЛ: НЕ ВЫБРАН</span>
+                    </header>
+                    
+                    <div id="messages-area" class="messages-container">
+                        <div class="no-chat-selected">
+                            <p>> ВЫБЕРИТЕ ЦЕЛЬ ДЛЯ СВЯЗИ</p>
+                        </div>
+                    </div>
+
+                    <form id="msg-form" class="msg-input-area" style="display: none;">
+                        <input type="text" id="msg-input" placeholder="ШИФРОВКА..." autocomplete="off">
+                        <button type="submit" class="btn-metal btn-send">></button>
+                    </form>
                 </div>
-            </div>
 
-            <div id="chat-screen" class="screen">
-                <header class="top-bar">
-                    <button id="back-btn" class="btn-small">< НАЗАД</button>
-                    <span id="chat-title">КАНАЛ: ---</span>
-                </header>
-                
-                <div id="messages-area" class="messages-container"></div>
-
-                <form id="msg-form" class="msg-input-area">
-                    <input type="text" id="msg-input" placeholder="ШИФРОВКА..." autocomplete="off">
-                    <button type="submit" class="btn-metal btn-send">ОТПРАВИТЬ</button>
-                </form>
-            </div>
-
-        </div>
+            </div> </div>
     </div>
 
     <div id="custom-modal" class="modal-overlay">
