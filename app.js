@@ -287,11 +287,19 @@ function loadMyChats() {
 // Сообщения
 function openChat(chatId, chatName) {
     currentChatId = chatId;
+    
     document.getElementById('chat-title').innerText = `КАНАЛ: ${chatName}`;
     document.getElementById('msg-form').style.display = 'flex'; 
     document.getElementById('messages-area').innerHTML = ''; 
+    
     chatPanel.classList.add('open');
+
+    // --- ДОБАВЛЕНО: Убираем фокус с поиска, чтобы на телефоне пропала клавиатура ---
+    if(searchInput) searchInput.blur(); 
+    // -------------------------------------------------------------------------------
+
     if (unsubscribeMessages) unsubscribeMessages();
+    
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "asc"));
     unsubscribeMessages = onSnapshot(q, (snap) => {
         const area = document.getElementById('messages-area');
