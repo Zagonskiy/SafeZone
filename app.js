@@ -29,6 +29,7 @@ let unsubscribeChats = null;
 let currentUserData = null; 
 let searchTimeout = null;
 let profileToEdit = null; // Для хранения ID профиля, который смотрим
+let currentChatPartnerAvatar = null; // <--- ДОБАВЬ ВОТ ЭТУ СТРОКУ
 
 // --- DOM ЭЛЕМЕНТЫ ---
 const authScreen = document.getElementById('auth-screen');
