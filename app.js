@@ -9,7 +9,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { 
     getFirestore, doc, setDoc, collection, query, where, getDocs, getDoc,
-    addDoc, serverTimestamp, orderBy, onSnapshot, deleteDoc, updateDoc
+    addDoc, serverTimestamp, orderBy, onSnapshot, deleteDoc, updateDocб, limit
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // --- КОНФИГУРАЦИЯ ---
@@ -39,10 +39,107 @@ const appInterface = document.getElementById('app-interface');
 const chatPanel = document.getElementById('chat-screen'); // Правая панель
 const userDisplay = document.getElementById('user-display');
 
-// Поиск
+// --- ПЕРЕМЕННЫЕ ПОИСКА ---
+const searchInput = document.getElementById('search-nick');
+const searchIndicator = document.getElementById('search-indicator');
 const searchResultsArea = document.getElementById('search-results');
 const searchList = document.getElementById('search-list');
-const closeSearchBtn = document.getElementById('close-search');
+
+// --- ЖИВОЙ ПОИСК (LIVE RADAR) ---
+let searchTimeout = null;
+
+searchInput.addEventListener('input', (e) => {
+    const text = e.target.value.trim();
+
+    // 1. Если пусто — скрываем результаты моментально
+    if (!text) {
+        searchResultsArea.style.display = 'none';
+        searchIndicator.classList.remove('active');
+        return;
+    }
+
+    // 2. Визуальный эффект "сканирования"
+    searchIndicator.classList.add('active');
+    searchResultsArea.style.display = 'block';
+    searchList.innerHTML = '<div style="padding:10px; opacity:0.5;">> СКАНИРОВАНИЕ...</div>';
+
+    // 3. Debounce (Задержка), чтобы не бомбить базу на каждой букве (ждем 300мс после ввода)
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => executeSearch(text), 300);
+});
+
+// Функция выполнения запроса
+async function executeSearch(queryText) {
+    try {
+        // Firebase трюк для поиска "начинается с..."
+        // Ищем от queryText до queryText + специальный символ
+        const endText = queryText + '\uf8ff';
+
+        const q = query(
+            collection(db, "users"),
+            orderBy("nickname"), // Обязательно для range-поиска
+            where("nickname", ">=", queryText),
+            where("nickname", "<=", endText),
+            limit(3) // Ограничиваем тремя бойцами
+        );
+
+        const snap = await getDocs(q);
+        renderSearchResults(snap);
+        
+    } catch (error) {
+        console.error("Radar Error:", error);
+        searchList.innerHTML = '<div style="padding:10px; color:red;">СБОЙ РАДАРА</div>';
+    } finally {
+        searchIndicator.classList.remove('active');
+    }
+}
+
+// Рендер результатов
+function renderSearchResults(snapshot) {
+    searchList.innerHTML = ''; // Очистка
+
+    if (snapshot.empty) {
+        searchList.innerHTML = '<div style="padding:10px; opacity:0.5;">> ЦЕЛЬ НЕ НАЙДЕНА</div>';
+        return;
+    }
+
+    let count = 0;
+    snapshot.forEach(docSnap => {
+        const user = docSnap.data();
+        const uid = docSnap.id;
+
+        // Не показываем себя
+        if (uid === auth.currentUser.uid) return;
+
+        count++;
+        const item = document.createElement('div');
+        item.className = 'search-item';
+        // Подсвечиваем совпадение (для красоты)
+        item.innerHTML = `
+            <span>${user.nickname}</span> 
+            <span style="font-size:0.7rem; opacity:0.6; padding-top:2px;">[СВЯЗЬ]</span>
+        `;
+        
+        item.onclick = () => {
+            searchInput.value = ''; // Очистить поле
+            searchResultsArea.style.display = 'none'; // Скрыть список
+            startChat(uid, user.nickname);
+        };
+        
+        searchList.appendChild(item);
+    });
+
+    if (count === 0) {
+        searchList.innerHTML = '<div style="padding:10px; opacity:0.5;">> ТОЛЬКО ВЫ</div>';
+    }
+}
+
+// Клик вне поиска закрывает его (UX)
+document.addEventListener('click', (e) => {
+    if (!searchInput.contains(e.target) && !searchResultsArea.contains(e.target)) {
+        searchResultsArea.style.display = 'none';
+    }
+});
 
 // Утилиты
 const modalOverlay = document.getElementById('custom-modal');
