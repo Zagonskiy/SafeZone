@@ -22,14 +22,14 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Глобальные
+// Глобальные переменные
 let currentChatId = null;
 let unsubscribeMessages = null; 
 let unsubscribeChats = null; 
 let currentUserData = null; 
 let searchTimeout = null;
-let profileToEdit = null; // Для хранения ID профиля, который смотрим
-let currentChatPartnerAvatar = null; // <--- ДОБАВЬ ВОТ ЭТУ СТРОКУ
+let profileToEdit = null; 
+let currentChatPartnerAvatar = null; 
 
 // --- DOM ЭЛЕМЕНТЫ ---
 const authScreen = document.getElementById('auth-screen');
@@ -96,7 +96,6 @@ function compressImage(file) {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // Ограничиваем размер до 300x300 пикселей (чтобы влезло в БД)
                 const MAX_WIDTH = 300;
                 const MAX_HEIGHT = 300;
                 let width = img.width;
@@ -118,9 +117,7 @@ function compressImage(file) {
                 canvas.height = height;
                 const ctx = canvas.getContext("2d");
                 ctx.drawImage(img, 0, 0, width, height);
-                // Сжимаем в JPEG с качеством 0.7
-                const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
-                resolve(dataUrl);
+                resolve(canvas.toDataURL("image/jpeg", 0.7));
             };
             img.onerror = (err) => reject(err);
         };
@@ -137,7 +134,7 @@ function compressChatImage(file) {
             img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                const MAX_SIZE = 600; // Разрешаем фото побольше
+                const MAX_SIZE = 600; 
                 let width = img.width;
                 let height = img.height;
 
@@ -156,7 +153,6 @@ function compressChatImage(file) {
                 canvas.height = height;
                 const ctx = canvas.getContext("2d");
                 ctx.drawImage(img, 0, 0, width, height);
-                // Качество 0.6 чтобы пролезло в базу
                 resolve(canvas.toDataURL("image/jpeg", 0.6));
             };
             img.onerror = (err) => reject(err);
@@ -197,18 +193,15 @@ async function openProfile(uid, isMyProfile) {
     if (isMyProfile) {
         data = currentUserData;
     } else {
-        // Загружаем чужие данные
         const snap = await getDoc(doc(db, "users", uid));
         if (snap.exists()) data = snap.data();
     }
 
     if (!data) return showModal("БОЕЦ НЕ НАЙДЕН", "alert");
 
-    // Заполняем форму
     profileNickInput.value = data.nickname || "Без имени";
     profileDescInput.value = data.description || "";
     
-    // Аватар
     if (data.avatarBase64) {
         profileImgPreview.src = data.avatarBase64;
         profileImgPreview.style.display = 'block';
@@ -219,7 +212,6 @@ async function openProfile(uid, isMyProfile) {
         avatarPlaceholder.style.display = 'flex';
     }
 
-    // Режим редактирования
     if (isMyProfile) {
         profileNickInput.disabled = false;
         profileDescInput.disabled = false;
@@ -250,12 +242,11 @@ btnSaveProfile.addEventListener('click', async () => {
             avatarBase64: newAvatar
         });
         
-        // Обновляем локальные данные
         currentUserData.nickname = newNick;
         currentUserData.description = newDesc;
         currentUserData.avatarBase64 = newAvatar;
         
-        updateMyDisplay(); // Обновить шапку
+        updateMyDisplay(); 
         profileModal.classList.remove('active');
         showModal("ДОСЬЕ ОБНОВЛЕНО", "alert");
 
@@ -267,7 +258,6 @@ btnSaveProfile.addEventListener('click', async () => {
 
 btnCloseProfile.addEventListener('click', () => profileModal.classList.remove('active'));
 
-// Обновление шапки (мой аватар и ник)
 function updateMyDisplay() {
     if (currentUserData) {
         userDisplay.innerText = `БОЕЦ: ${currentUserData.nickname}`;
@@ -328,7 +318,6 @@ function renderSearchResults(snapshot) {
         count++;
         const item = document.createElement('div');
         item.className = 'search-item';
-        // Если есть аватарка в поиске - показываем
         const avatarHTML = user.avatarBase64 
             ? `<img src="${user.avatarBase64}" style="width:20px; height:20px; border-radius:50%; margin-right:5px; vertical-align:middle;">` 
             : '';
@@ -390,7 +379,7 @@ onAuthStateChanged(auth, async (user) => {
             const snap = await getDoc(doc(db, "users", user.uid));
             if (snap.exists()) currentUserData = { uid: user.uid, ...snap.data() };
         }
-        updateMyDisplay(); // Обновить шапку
+        updateMyDisplay();
         loadMyChats();
     } else {
         appInterface.classList.add('hidden');
@@ -430,66 +419,46 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     } catch (err) { showModal("ОШИБКА ДОСТУПА", 'alert'); }
 });
 
-// --- СПИСОК ЧАТОВ (С АВАТАРКАМИ) ---
+// --- СПИСОК ЧАТОВ ---
 function loadMyChats() {
     if (!auth.currentUser) return;
-    
-    // Запрос к базе: ищем чаты, где я есть, сортируем по свежести
-    const q = query(
-        collection(db, "chats"), 
-        where("participants", "array-contains", auth.currentUser.uid),
-        orderBy("lastUpdated", "desc")
-    );
-    
+    const q = query(collection(db, "chats"), where("participants", "array-contains", auth.currentUser.uid), orderBy("lastUpdated", "desc"));
     unsubscribeChats = onSnapshot(q, (snap) => {
         const container = document.getElementById('chats-container');
-        container.innerHTML = ''; // Очищаем список перед обновлением
-        
+        container.innerHTML = '';
         if (snap.empty) {
             document.getElementById('empty-state').style.display = 'flex';
         } else {
             document.getElementById('empty-state').style.display = 'none';
-            
             snap.forEach(async docSnap => {
                 const data = docSnap.data();
-                
-                // 1. Ищем ID и Имя собеседника
                 const otherUid = data.participants.find(uid => uid !== auth.currentUser.uid);
                 const otherName = data.participantNames.find(n => n !== currentUserData.nickname) || "UNKNOWN";
                 
-                // 2. Создаем сам блок (ПРЯМОУГОЛЬНИК)
                 const el = document.createElement('div');
-                el.className = 'chat-item'; // <--- ВОТ ЗДЕСЬ МЫ ПРИСВАИВАЕМ КЛАСС
-                
-                // Уникальный ID для картинки, чтобы потом ее найти и обновить
+                el.className = 'chat-item'; 
                 const imgId = `avatar-chat-${docSnap.id}`;
                 
-                // 3. Вставляем HTML внутрь прямоугольника
                 el.innerHTML = `
                     <img id="${imgId}" src="" class="chat-list-avatar" style="display:none">
                     <div>${otherName}</div>
                 `;
                 
-                // Клик открывает чат
                 el.onclick = () => openChat(docSnap.id, otherName);
                 container.appendChild(el);
 
-                // 4. Отдельно подгружаем аватарку собеседника из его профиля
                 if (otherUid) {
                     const userSnap = await getDoc(doc(db, "users", otherUid));
                     if (userSnap.exists()) {
                         const uData = userSnap.data();
                         const imgEl = document.getElementById(imgId);
-                        
-                        // Если фото найдено и элемент еще существует
                         if (imgEl && uData.avatarBase64) {
                             imgEl.src = uData.avatarBase64;
                             imgEl.style.display = 'block';
                         } else if (imgEl) {
-                            // Если фото нет - показываем пустой серый круг
                              imgEl.style.display = 'block';
                              imgEl.style.backgroundColor = '#222';
-                             imgEl.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; // Пустой пиксель
+                             imgEl.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
                         }
                     }
                 }
@@ -498,8 +467,7 @@ function loadMyChats() {
     });
 }
 
-// --- ОТКРЫТИЕ ЧАТА (ИСПРАВЛЕНО) ---
-// --- ОТКРЫТИЕ ЧАТА (С ФУНКЦИЕЙ ПРОЧТЕНИЯ) ---
+// --- ОТКРЫТИЕ ЧАТА ---
 async function openChat(chatId, chatName) {
     currentChatId = chatId;
     currentChatPartnerAvatar = null;
@@ -511,7 +479,6 @@ async function openChat(chatId, chatName) {
     chatPanel.classList.add('open');
     if(searchInput) searchInput.blur(); 
 
-    // 1. Грузим аватар собеседника
     try {
         const chatSnap = await getDoc(doc(db, "chats", chatId));
         if (chatSnap.exists()) {
@@ -526,10 +493,8 @@ async function openChat(chatId, chatName) {
         }
     } catch (e) { console.error(e); }
 
-    // 2. Слушаем сообщения
     if (unsubscribeMessages) unsubscribeMessages();
     
-    // ВАЖНО: Мы включаем includeMetadataChanges: true, чтобы видеть состояние "Часики" (pending writes)
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "asc"));
     
     unsubscribeMessages = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
@@ -538,126 +503,105 @@ async function openChat(chatId, chatName) {
         
         snap.forEach((docSnap) => {
             const msg = docSnap.data();
-            
-            // ЛОГИКА ПРОЧТЕНИЯ:
-            // Если сообщение чужое И оно не прочитано И оно уже на сервере (не в кеше) -> Помечаем прочитанным
             if (msg.senderId !== auth.currentUser.uid && !msg.read && !docSnap.metadata.hasPendingWrites) {
-                // Делаем это тихо, без await, чтобы не тормозить интерфейс
                 updateDoc(doc(db, "chats", chatId, "messages", docSnap.id), { read: true });
             }
-
             renderMessage(docSnap);
         });
         
-        // Автоскролл
         setTimeout(() => { area.scrollTop = area.scrollHeight; }, 10);
     });
 }
 
-// Клик по плюсику -> открываем выбор файла
+// Кнопка вложения фото
 btnAttachImg.addEventListener('click', () => {
-    chatImgUpload.value = ''; // Сброс, чтобы можно было выбрать тот же файл
+    chatImgUpload.value = ''; 
     chatImgUpload.click();
 });
 
 // --- ЛОГИКА ОТПРАВКИ ФОТО С ПРЕДПРОСМОТРОМ ---
-
-// Элементы модального окна превью
 const photoModal = document.getElementById('photo-preview-modal');
 const photoPreviewImg = document.getElementById('photo-preview-img');
 const photoCaptionInput = document.getElementById('photo-caption-input');
 const btnCancelPhoto = document.getElementById('btn-cancel-photo');
 const btnConfirmPhoto = document.getElementById('btn-confirm-photo');
-
-// Переменная для хранения выбранного файла
 let selectedFile = null;
 
-// 1. Когда файл выбран в проводнике
 chatImgUpload.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    selectedFile = file; // Запоминаем файл
-
-    // Читаем файл только для показа превью (без сжатия пока)
+    selectedFile = file;
     const reader = new FileReader();
     reader.onload = (event) => {
-        photoPreviewImg.src = event.target.result; // Показываем картинку
-        photoCaptionInput.value = ''; // Очищаем старую подпись
-        photoModal.classList.add('active'); // Открываем окно
+        photoPreviewImg.src = event.target.result;
+        photoCaptionInput.value = '';
+        photoModal.classList.add('active'); 
     };
     reader.readAsDataURL(file);
 });
 
-// 2. Кнопка ОТМЕНА
 btnCancelPhoto.addEventListener('click', () => {
     photoModal.classList.remove('active');
-    chatImgUpload.value = ''; // Сбрасываем инпут
+    chatImgUpload.value = ''; 
     selectedFile = null;
 });
 
-// 3. Кнопка ОТПРАВИТЬ (в модальном окне)
 btnConfirmPhoto.addEventListener('click', async () => {
     if (!selectedFile || !currentChatId) return;
-
-    // Блокируем кнопку, чтобы не нажал дважды
     btnConfirmPhoto.innerText = "СЖАТИЕ...";
     btnConfirmPhoto.disabled = true;
 
     try {
-        // Сжимаем
         const base64 = await compressChatImage(selectedFile);
-        
-        // Берем подпись (или ставим [ФОТО] если пусто)
         const caption = photoCaptionInput.value.trim() || "[ФОТО]";
 
-        // Отправляем
         await addDoc(collection(db, "chats", currentChatId, "messages"), {
-            text: caption, // ТЕПЕРЬ ТУТ ТВОЯ ПОДПИСЬ
+            text: caption, 
             imageBase64: base64,
             senderId: auth.currentUser.uid, 
             senderNick: currentUserData.nickname,
             senderAvatar: currentUserData.avatarBase64 || null,
             createdAt: serverTimestamp(), 
-            edited: false
-            read: false // <--- НОВОЕ ПОЛЕ: Изначально не прочитано
+            edited: false,
+            read: false // ЗАПЯТАЯ ИСПРАВЛЕНА
         });
         
         await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
-        
-        // Закрываем окно и чистим
         photoModal.classList.remove('active');
         chatImgUpload.value = '';
         selectedFile = null;
 
     } catch (err) {
         console.error(err);
-        alert("ОШИБКА ОТПРАВКИ ФОТО"); // Используем alert для простоты тут, или showModal
+        alert("ОШИБКА ОТПРАВКИ ФОТО"); 
     } finally {
-        // Возвращаем кнопку в исходное состояние
         btnConfirmPhoto.innerText = "ОТПРАВИТЬ";
         btnConfirmPhoto.disabled = false;
     }
 });
+
+// ОТПРАВКА ТЕКСТА
 document.getElementById('msg-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const input = document.getElementById('msg-input');
     const text = input.value.trim();
     if (!text || !currentChatId) return;
+    
     await addDoc(collection(db, "chats", currentChatId, "messages"), {
         text, 
         senderId: auth.currentUser.uid, 
         senderNick: currentUserData.nickname,
-        // Добавляем аватарку в сообщение, чтобы не грузить её каждый раз
         senderAvatar: currentUserData.avatarBase64 || null, 
         createdAt: serverTimestamp(), 
-        edited: false
-        read: false // <--- НОВОЕ ПОЛЕ: Изначально не прочитано
+        edited: false,
+        read: false // ЗАПЯТАЯ ИСПРАВЛЕНА
     });
+    
     await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
     input.value = '';
 });
 
+// РЕНДЕР СООБЩЕНИЙ
 function renderMessage(docSnap) {
     const msg = docSnap.data();
     const isMine = msg.senderId === auth.currentUser.uid;
@@ -665,13 +609,14 @@ function renderMessage(docSnap) {
     const row = document.createElement('div');
     row.className = `msg-row ${isMine ? 'my' : 'other'}`;
 
-    // Аватарка (для чужих)
     if (!isMine) {
         const avatar = document.createElement('img');
         avatar.className = 'chat-avatar';
-        if (currentChatPartnerAvatar) avatar.src = currentChatPartnerAvatar;
-        else if (msg.senderAvatar) avatar.src = msg.senderAvatar;
-        else {
+        if (currentChatPartnerAvatar) {
+            avatar.src = currentChatPartnerAvatar;
+        } else if (msg.senderAvatar) {
+            avatar.src = msg.senderAvatar;
+        } else {
             avatar.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; 
             avatar.style.backgroundColor = '#333';
         }
@@ -679,21 +624,18 @@ function renderMessage(docSnap) {
         row.appendChild(avatar);
     }
 
-    // Сообщение
     const div = document.createElement('div');
     div.className = `msg ${isMine ? 'my' : 'other'}`;
     
-    // Имя (для чужих)
     if (!isMine) {
         const nickSpan = document.createElement('div');
         nickSpan.innerText = msg.senderNick;
-        nickSpan.style.fontSize = '0.7rem'; nickSpan.style.color = '#888'; 
-        nickSpan.style.cursor = 'pointer';
+        nickSpan.style.fontSize = '0.7rem'; nickSpan.style.marginBottom = '2px';
+        nickSpan.style.color = '#888'; nickSpan.style.cursor = 'pointer';
         nickSpan.onclick = () => openProfile(msg.senderId, false);
         div.appendChild(nickSpan);
     }
 
-    // Контент (Текст или Фото)
     const contentDiv = document.createElement('div');
     if (msg.imageBase64) {
         const img = document.createElement('img');
@@ -711,11 +653,9 @@ function renderMessage(docSnap) {
     }
     div.appendChild(contentDiv);
 
-    // Мета-данные (Время + Статус)
     const metaDiv = document.createElement('div');
     metaDiv.className = 'msg-meta';
     
-    // Кнопки управления (свои)
     if (isMine && !msg.imageBase64) {
         const editBtn = document.createElement('span');
         editBtn.innerText = '[E]'; editBtn.style.cursor = 'pointer'; editBtn.style.marginRight = '5px';
@@ -729,119 +669,29 @@ function renderMessage(docSnap) {
         metaDiv.appendChild(delBtn);
     }
 
-    // Время
     const timeSpan = document.createElement('span');
     const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
     timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
     metaDiv.appendChild(timeSpan);
 
-    // --- ИНДИКАТОРЫ СТАТУСА (ТОЛЬКО ДЛЯ СВОИХ) ---
     if (isMine) {
         const statusSpan = document.createElement('span');
         statusSpan.className = 'msg-status';
-        
-        // 1. Проверяем метаданные Firebase (pending writes)
         if (docSnap.metadata.hasPendingWrites) {
-            // Сообщение еще не на сервере (Часики)
-            statusSpan.innerHTML = '🕒'; 
-            statusSpan.className += ' status-wait';
-            statusSpan.title = "Отправка...";
+            statusSpan.innerHTML = '🕒'; statusSpan.className += ' status-wait';
         } else if (msg.read) {
-            // Прочитано (Две галочки)
-            statusSpan.innerHTML = '✓✓';
-            statusSpan.className += ' status-read';
-            statusSpan.title = "Прочитано";
+            statusSpan.innerHTML = '✓✓'; statusSpan.className += ' status-read';
         } else {
-            // Отправлено, но не прочитано (Одна галочка)
-            statusSpan.innerHTML = '✓';
-            statusSpan.className += ' status-sent';
-            statusSpan.title = "Доставлено";
+            statusSpan.innerHTML = '✓'; statusSpan.className += ' status-sent';
         }
         metaDiv.appendChild(statusSpan);
     }
-    // ---------------------------------------------
 
     div.appendChild(metaDiv);
     row.appendChild(div);
-    
     document.getElementById('messages-area').appendChild(row);
 }
 
-    // ТЕЛО СООБЩЕНИЯ
-    const div = document.createElement('div');
-    div.className = `msg ${isMine ? 'my' : 'other'}`;
-    
-    // Имя (для чужих)
-    if (!isMine) {
-        const nickSpan = document.createElement('div');
-        nickSpan.innerText = msg.senderNick;
-        nickSpan.style.fontSize = '0.7rem'; 
-        nickSpan.style.marginBottom = '2px';
-        nickSpan.style.color = '#888'; 
-        nickSpan.style.cursor = 'pointer';
-        nickSpan.onclick = () => openProfile(msg.senderId, false);
-        div.appendChild(nickSpan);
-    }
-
-    // --- ЛОГИКА ОТОБРАЖЕНИЯ КОНТЕНТА ---
-    const contentDiv = document.createElement('div');
-    
-    if (msg.imageBase64) {
-        // Если это картинка
-        const img = document.createElement('img');
-        img.src = msg.imageBase64;
-        img.className = 'msg-image-content';
-        // Клик по картинке открывает её на весь экран (можно использовать showModal для просмотра)
-        img.onclick = () => {
-            // Простое открытие в новой вкладке для просмотра
-            const win = window.open();
-            win.document.write('<img src="' + msg.imageBase64 + '" style="width:100%">');
-        };
-        contentDiv.appendChild(img);
-        
-        // Если есть подпись к фото (на будущее)
-        if(msg.text && msg.text !== "[ФОТО]") {
-            const caption = document.createElement('div');
-            caption.innerText = msg.text;
-            caption.style.marginTop = "5px";
-            contentDiv.appendChild(caption);
-        }
-    } else {
-        // Если просто текст
-        contentDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
-    }
-    
-    div.appendChild(contentDiv);
-    // -----------------------------------
-
-    const metaDiv = document.createElement('div');
-    metaDiv.className = 'msg-meta';
-    
-    if (isMine) {
-        // Фото редактировать нельзя, только текст
-        if (!msg.imageBase64) {
-            const editBtn = document.createElement('span');
-            editBtn.innerText = '[E]'; editBtn.style.cursor = 'pointer'; editBtn.style.marginRight = '8px';
-            editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
-            metaDiv.appendChild(editBtn);
-        }
-
-        const delBtn = document.createElement('span');
-        delBtn.innerText = '[X]'; delBtn.style.cursor = 'pointer'; delBtn.style.marginRight = '8px';
-        delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id);
-        metaDiv.appendChild(delBtn);
-    }
-
-    const timeSpan = document.createElement('span');
-    const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
-    timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
-    
-    metaDiv.appendChild(timeSpan);
-    div.appendChild(metaDiv);
-    row.appendChild(div);
-    
-    document.getElementById('messages-area').appendChild(row);
-}
 // Глобальные функции
 window.deleteMsg = async (cId, mId) => { if (await showModal('УДАЛИТЬ?', 'confirm')) await deleteDoc(doc(db, "chats", cId, "messages", mId)); };
 window.editMsg = async (cId, mId, old) => {
