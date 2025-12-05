@@ -147,7 +147,20 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 .msg { max-width: 70%; padding: 8px 12px; border-radius: 4px; font-size: 0.9rem; word-wrap: break-word; }
 .msg.my { background: rgba(0, 50, 0, 0.6); border-right: 3px solid var(--text-green); text-align: right; }
 .msg.other { background: rgba(40, 40, 40, 0.6); border-left: 3px solid var(--text-dim); }
-.msg-meta { font-size: 0.65rem; opacity: 0.6; margin-top: 4px; display: flex; justify-content: flex-end; gap: 8px;}
+/* МЕТА-ДАННЫЕ (ВРЕМЯ + КНОПКИ + ГАЛОЧКИ) */
+.msg-meta { 
+    font-size: 0.65rem; 
+    opacity: 0.6; 
+    margin-top: 4px; 
+    
+    display: flex; 
+    justify-content: flex-end; 
+    align-items: center; /* Чтобы галочки и время были на одной линии */
+    gap: 5px; /* Небольшой отступ между элементами */
+    
+    white-space: nowrap; /* ГЛАВНОЕ: Запрещаем перенос строки */
+    flex-wrap: nowrap;   /* Дублируем запрет для Flexbox */
+}
 
 /* ЗОНА ВВОДА - ВСЕГДА ПРИЖАТА К НИЗУ */
 .msg-input-area { 
@@ -312,20 +325,20 @@ textarea.terminal-textarea { height: 80px; resize: none; }
     border: 1px solid #333;
 }
 
-/* СТАТУС СООБЩЕНИЯ */
+/* СТАТУС СООБЩЕНИЯ (ГАЛОЧКИ) */
 .msg-status {
-    font-size: 0.7rem;
-    margin-left: 5px;
+    font-size: 0.6rem; /* Уменьшили размер галочек */
     font-weight: bold;
     display: inline-block;
-    width: 20px; /* Фикс ширины, чтобы время не прыгало */
-    text-align: right;
+    width: auto; /* Убрали width: 20px, чтобы не занимало лишнее место */
+    margin-left: 2px;
+    line-height: 1; /* Чтобы не растягивало высоту */
 }
 
 /* Цвета статусов */
-.status-wait { color: #666; }       /* Часы */
-.status-sent { color: #888; }       /* Одна галочка */
-.status-read { color: var(--text-green); text-shadow: 0 0 5px var(--text-green); } /* Две галочки */
+.status-wait { color: #666; font-size: 0.5rem; } /* Часики чуть меньше */
+.status-sent { color: #888; }       
+.status-read { color: var(--text-green); text-shadow: 0 0 5px var(--text-green); }
 
 /* ОКНО ПРОСМОТРА ФОТО */
 .modal-content-img {
