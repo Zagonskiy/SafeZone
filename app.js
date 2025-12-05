@@ -9,7 +9,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { 
     getFirestore, doc, setDoc, collection, query, where, getDocs, getDoc,
-    addDoc, serverTimestamp, orderBy, onSnapshot, deleteDoc, updateDocб, limit
+    addDoc, serverTimestamp, orderBy, onSnapshot, deleteDoc, updateDoc, limit
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // --- КОНФИГУРАЦИЯ ---
