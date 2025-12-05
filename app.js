@@ -31,6 +31,12 @@ let searchTimeout = null;
 let profileToEdit = null; 
 let currentChatPartnerAvatar = null; 
 
+// Переменные для записи
+let mediaRecorder = null;
+let audioChunks = [];
+let recStartTime = null;
+let recInterval = null;
+
 // --- DOM ЭЛЕМЕНТЫ ---
 const authScreen = document.getElementById('auth-screen');
 const appInterface = document.getElementById('app-interface');
@@ -48,6 +54,13 @@ const searchInput = document.getElementById('search-nick');
 const searchIndicator = document.getElementById('search-indicator');
 const searchResultsArea = document.getElementById('search-results');
 const searchList = document.getElementById('search-list');
+
+const btnMicRec = document.getElementById('btn-mic-rec');
+const recordingPanel = document.getElementById('recording-panel');
+const standardPanel = document.getElementById('standard-panel');
+const recTimerDisplay = document.getElementById('rec-timer');
+const btnCancelRec = document.getElementById('btn-cancel-rec');
+const btnSendRec = document.getElementById('btn-send-rec');
 
 // --- ПРОФИЛЬ ЭЛЕМЕНТЫ ---
 const profileModal = document.getElementById('profile-modal');
@@ -603,6 +616,117 @@ btnConfirmPhoto.addEventListener('click', async () => {
     }
 });
 
+// --- ЛОГИКА ГОЛОСОВЫХ СООБЩЕНИЙ ---
+
+// 1. Старт записи
+btnMicRec.addEventListener('click', async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        return showModal("ВАШ ТЕРМИНАЛ НЕ ПОДДЕРЖИВАЕТ ЗАПИСЬ", "alert");
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Настройки для максимального сжатия (радио-качество)
+        const options = { mimeType: 'audio/webm;codecs=opus', bitsPerSecond: 16000 }; 
+        
+        try {
+            mediaRecorder = new MediaRecorder(stream, options);
+        } catch (e) {
+            // Фолбек, если браузер не умеет сжимать (Safari)
+            mediaRecorder = new MediaRecorder(stream); 
+        }
+
+        audioChunks = [];
+        
+        mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) audioChunks.push(event.data);
+        };
+
+        mediaRecorder.start();
+        
+        // UI
+        standardPanel.style.display = 'none';
+        recordingPanel.style.display = 'flex';
+        startTimer();
+
+    } catch (err) {
+        showModal("ДОСТУП К МИКРОФОНУ ЗАПРЕЩЕН", "alert");
+    }
+});
+
+// 2. Отмена записи
+btnCancelRec.addEventListener('click', () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(track => track.stop()); // Выключаем микрофон
+    }
+    resetRecUI();
+});
+
+// 3. Отправка записи
+btnSendRec.addEventListener('click', () => {
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+
+    mediaRecorder.stop();
+    mediaRecorder.stream.getTracks().forEach(track => track.stop()); // Выключаем микрофон
+
+    mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        
+        // Проверка размера (Лимит Firestore 1MB)
+        if (audioBlob.size > 950000) {
+            resetRecUI();
+            return showModal("ОШИБКА: ЗАПИСЬ СЛИШКОМ ДЛИННАЯ (LIMIT 1MB)", "alert");
+        }
+
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = async () => {
+            const base64Audio = reader.result;
+            
+            try {
+                await addDoc(collection(db, "chats", currentChatId, "messages"), {
+                    text: "[ГОЛОСОВОЕ СООБЩЕНИЕ]",
+                    audioBase64: base64Audio,
+                    senderId: auth.currentUser.uid, 
+                    senderNick: currentUserData.nickname,
+                    senderAvatar: currentUserData.avatarBase64 || null,
+                    createdAt: serverTimestamp(), 
+                    edited: false,
+                    read: false
+                });
+                
+                await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
+                
+            } catch (e) {
+                console.error(e);
+                showModal("СБОЙ СВЯЗИ ПРИ ОТПРАВКЕ", "alert");
+            }
+            resetRecUI();
+        };
+    };
+});
+
+// Утилиты таймера
+function startTimer() {
+    recStartTime = Date.now();
+    recInterval = setInterval(() => {
+        const diff = Math.floor((Date.now() - recStartTime) / 1000);
+        const m = Math.floor(diff / 60).toString().padStart(2, '0');
+        const s = (diff % 60).toString().padStart(2, '0');
+        recTimerDisplay.innerText = `${m}:${s}`;
+    }, 1000);
+}
+
+function resetRecUI() {
+    clearInterval(recInterval);
+    recTimerDisplay.innerText = "00:00";
+    recordingPanel.style.display = 'none';
+    standardPanel.style.display = 'flex';
+    audioChunks = [];
+}
+
 // ОТПРАВКА ТЕКСТА
 document.getElementById('msg-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -631,7 +755,7 @@ function renderMessage(docSnap) {
     const row = document.createElement('div');
     row.className = `msg-row ${isMine ? 'my' : 'other'}`;
 
-    // АВАТАРКА (для чужих)
+    // АВАТАРКА
     if (!isMine) {
         const avatar = document.createElement('img');
         avatar.className = 'chat-avatar';
@@ -647,11 +771,10 @@ function renderMessage(docSnap) {
         row.appendChild(avatar);
     }
 
-    // БЛОК СООБЩЕНИЯ
+    // ТЕЛО СООБЩЕНИЯ
     const div = document.createElement('div');
     div.className = `msg ${isMine ? 'my' : 'other'}`;
     
-    // Имя (для чужих)
     if (!isMine) {
         const nickSpan = document.createElement('div');
         nickSpan.innerText = msg.senderNick;
@@ -663,83 +786,84 @@ function renderMessage(docSnap) {
         div.appendChild(nickSpan);
     }
 
-    // --- КОНТЕНТ (ИСПРАВЛЕНО: УБРАНО ДУБЛИРОВАНИЕ) ---
     const contentDiv = document.createElement('div');
     
-    if (msg.imageBase64) {
-        // Если это КАРТИНКА
+    // --- ВАРИАНТЫ КОНТЕНТА ---
+    if (msg.audioBase64) {
+        // 1. ГОЛОСОВОЕ
+        const audioWrapper = document.createElement('div');
+        audioWrapper.className = 'audio-player-wrapper';
+        
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.src = msg.audioBase64;
+        
+        audioWrapper.appendChild(audio);
+        contentDiv.appendChild(audioWrapper);
+        
+        const caption = document.createElement('div');
+        caption.innerText = "/// VOICE DATA ///";
+        caption.style.fontSize = "0.6rem"; caption.style.opacity = "0.5";
+        contentDiv.appendChild(caption);
+
+    } else if (msg.imageBase64) {
+        // 2. КАРТИНКА
         const img = document.createElement('img');
         img.src = msg.imageBase64;
         img.className = 'msg-image-content';
-        
-        // При клике вызываем просмотрщик
         img.onclick = () => viewImage(msg.imageBase64, msg.text);
-        
         contentDiv.appendChild(img);
         
-        // Подпись к фото
         if(msg.text && msg.text !== "[ФОТО]") {
             const caption = document.createElement('div');
-            caption.innerText = msg.text; 
-            caption.style.marginTop = "5px";
+            caption.innerText = msg.text; caption.style.marginTop = "5px";
             contentDiv.appendChild(caption);
         }
     } else {
-        // Если это ТЕКСТ
+        // 3. ТЕКСТ
         contentDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
     }
+    // ---------------------------
+
     div.appendChild(contentDiv);
-    // --------------------------------------------------
 
     const metaDiv = document.createElement('div');
     metaDiv.className = 'msg-meta';
     
-    // Кнопки управления (свои)
-    // Разрешаем редактировать текст, даже если это подпись к фото
-    if (isMine) {
+    // Редактирование (запрещено для медиа)
+    if (isMine && !msg.imageBase64 && !msg.audioBase64) {
         const editBtn = document.createElement('span');
-        editBtn.innerText = '[E]'; 
-        editBtn.style.cursor = 'pointer'; 
-        editBtn.style.marginRight = '5px';
+        editBtn.innerText = '[E]'; editBtn.style.cursor = 'pointer'; editBtn.style.marginRight = '5px';
         editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
         metaDiv.appendChild(editBtn);
     }
     if (isMine) {
         const delBtn = document.createElement('span');
-        delBtn.innerText = '[X]'; 
-        delBtn.style.cursor = 'pointer'; 
-        delBtn.style.marginRight = '5px';
+        delBtn.innerText = '[X]'; delBtn.style.cursor = 'pointer'; delBtn.style.marginRight = '5px';
         delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id);
         metaDiv.appendChild(delBtn);
     }
 
-    // Время
     const timeSpan = document.createElement('span');
     const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
     timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
     metaDiv.appendChild(timeSpan);
 
-    // Статусы (галочки)
     if (isMine) {
         const statusSpan = document.createElement('span');
         statusSpan.className = 'msg-status';
-        
         if (docSnap.metadata.hasPendingWrites) {
-            statusSpan.innerHTML = '🕒'; 
-            statusSpan.className += ' status-wait';
+            statusSpan.innerHTML = '🕒'; statusSpan.className += ' status-wait';
         } else if (msg.read) {
-            statusSpan.innerHTML = '✓✓'; 
-            statusSpan.className += ' status-read';
+            statusSpan.innerHTML = '✓✓'; statusSpan.className += ' status-read';
         } else {
-            statusSpan.innerHTML = '✓'; 
-            statusSpan.className += ' status-sent';
+            statusSpan.innerHTML = '✓'; statusSpan.className += ' status-sent';
         }
         metaDiv.appendChild(statusSpan);
     }
 
     div.appendChild(metaDiv);
     row.appendChild(div);
-    
     document.getElementById('messages-area').appendChild(row);
 }
 
