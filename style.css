@@ -423,54 +423,70 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 .text-red { color: var(--alert-red); border-color: var(--alert-red); }
 .btn-icon-small { width: 40px; height: 35px; padding: 0; display: flex; align-items: center; justify-content: center; margin: 0; }
 
-/* --- СТИЛИЗАЦИЯ АУДИО ПЛЕЕРА (ТЕРМИНАЛ) --- */
+/* --- СТИЛИЗАЦИЯ АУДИО ПЛЕЕРА (ТЕРМИНАЛ v2.0) --- */
 
 .audio-player-wrapper {
     margin-top: 4px;
-    width: 220px; /* Компактный размер */
-    height: 34px; /* Низкий профиль */
-    background: #050505; /* Почти черный фон */
+    width: 220px; /* Фиксированная ширина видимой части */
+    height: 34px;
+    background: #050505; 
 
-    /* Рубленые углы и тактическая рамка */
+    /* Рамка */
     border: 1px solid var(--text-dim);
-    border-left: 4px solid var(--text-green); /* Акцент "активно" слева */
-    border-radius: 2px; /* Едва заметное скругление */
+    border-left: 4px solid var(--text-green);
+    border-radius: 2px;
 
+    /* ВАЖНО: display flex и hidden скрывают лишнее */
     display: flex;
     align-items: center;
-    overflow: hidden;
-    position: relative; /* Для наложения сетки */
+    overflow: hidden; /* Обрезает все, что вылезает за пределы (троеточие) */
+    
+    position: relative;
     box-shadow: inset 0 0 5px rgba(0,0,0,0.8);
 }
 
-/* Декоративная сетка-сканер поверх плеера */
+/* Декоративная сетка (оставляем, красиво) */
 .audio-player-wrapper::after {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    /* Вертикальные линии */
+    content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
     background-image: linear-gradient(90deg, transparent 95%, rgba(26, 128, 26, 0.2) 5%);
     background-size: 10px 100%;
-    pointer-events: none; /* Чтобы можно было нажимать кнопки сквозь сетку */
-    z-index: 2;
+    pointer-events: none; z-index: 2;
 }
 
-/* Стандартный плеер (Цветовой взлом) */
+/* Стандартный плеер (Взлом стилей) */
 audio {
-    width: 105%; /* Чуть шире контейнера, чтобы скрыть родные рамки браузера */
+    /* 1. ХАК ДЛЯ УДАЛЕНИЯ ТРОЕТОЧИЯ */
+    /* Делаем плеер шире контейнера на 30px */
+    width: calc(100% + 30px); 
     height: 100%;
     
-    /* Сложный фильтр для придания кислотно-зеленого цвета */
-    /* Работает по-разному в разных браузерах, но в целом дает нужный эффект */
-    filter: invert(0.9) sepia(1) hue-rotate(85deg) saturate(2) brightness(0.9) contrast(1.2);
+    /* Сдвигаем влево, чтобы обрезался именно правый край с кнопкой меню */
+    margin-right: -30px; 
+    
+    /* 2. ЦВЕТОВАЯ КОРРЕКЦИЯ (ЗЕЛЕНЫЙ) */
+    /* invert(1) -> Делает фон черным, иконки белыми.
+       sepia(1) -> Делает иконки коричневыми.
+       saturate(10) -> Делает цвет максимально насыщенным (ядерным).
+       hue-rotate(95deg) -> Сдвигает ядерный цвет в зеленый спектр.
+    */
+    filter: invert(0.9) sepia(1) saturate(5) hue-rotate(95deg);
     
     outline: none;
     position: relative;
-    z-index: 1; /* Под сеткой, но над фоном */
-    margin-left: -5px; /* Центровка после увеличения ширины */
+    z-index: 1;
+    display: block;
 }
 
-/* Хак для Chrome, чтобы убрать белый фон контролов */
+/* Хак для Chrome/Edge: Убирает родной белый фон, чтобы работал наш фильтр */
 audio::-webkit-media-controls-enclosure {
+    background-color: transparent !important;
+    border-radius: 0 !important;
+}
+
+/* Скрываем конкретно кнопку меню в Chrome (дополнительная страховка) */
+audio::-webkit-media-controls-overflow-menu-button {
+    display: none !important;
+}
+audio::-webkit-media-controls-panel {
     background-color: transparent !important;
 }
