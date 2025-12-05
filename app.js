@@ -76,30 +76,23 @@ if (searchInput) {
     searchInput.addEventListener('input', (e) => {
         const text = e.target.value.trim();
         
-        // Скрываем, если пусто
         if (!text) {
             searchResultsArea.style.display = 'none';
             if(searchIndicator) searchIndicator.classList.remove('active');
             return;
         }
 
-        // Показываем индикатор
         if(searchIndicator) searchIndicator.classList.add('active');
         searchResultsArea.style.display = 'block';
         searchList.innerHTML = '<div style="padding:15px; opacity:0.7;">>> СКАНИРОВАНИЕ...</div>';
 
-        console.log("Ввод обнаружен:", text); // ДИАГНОСТИКА
-
         clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => executeSearch(text), 500); // 0.5 сек задержка
+        searchTimeout = setTimeout(() => executeSearch(text), 500);
     });
 }
 
 async function executeSearch(queryText) {
     try {
-        console.log("Запрос в базу данных:", queryText); // ДИАГНОСТИКА
-        
-        // Поиск по диапазону (Начинается с...)
         const endText = queryText + '\uf8ff';
         
         const q = query(
@@ -129,11 +122,10 @@ function renderSearchResults(snapshot, queryText) {
     searchList.innerHTML = ''; 
 
     if (snapshot.empty) {
-        console.log("Ничего не найдено");
         searchList.innerHTML = `
             <div style="padding:15px; opacity:0.5; text-align:center;">
                 ЦЕЛЬ НЕ ОБНАРУЖЕНА<br>
-                <span style="font-size:0.7rem; color:red;">(Помни про регистр букв!)</span>
+                <span style="font-size:0.7rem; color:red;">(Учитывайте регистр букв!)</span>
             </div>`;
         return;
     }
@@ -143,7 +135,7 @@ function renderSearchResults(snapshot, queryText) {
         const user = docSnap.data();
         const uid = docSnap.id;
 
-        if (uid === auth.currentUser.uid) return; // Не показывать себя
+        if (uid === auth.currentUser.uid) return; 
 
         count++;
         const item = document.createElement('div');
@@ -153,9 +145,7 @@ function renderSearchResults(snapshot, queryText) {
             <span style="font-size:0.8rem; opacity:0.6;">[СВЯЗАТЬСЯ]</span>
         `;
         
-        // При клике создаем чат
         item.onclick = () => {
-            console.log("Выбран боец:", user.nickname);
             searchInput.value = '';
             searchResultsArea.style.display = 'none';
             startChat(uid, user.nickname);
@@ -173,7 +163,6 @@ function renderSearchResults(snapshot, queryText) {
 async function startChat(targetUid, targetNick) {
     const chatDocId = [auth.currentUser.uid, targetUid].sort().join("_");
     
-    // Создаем чат в базе
     await setDoc(doc(db, "chats", chatDocId), {
         participants: [auth.currentUser.uid, targetUid],
         participantNames: [currentUserData.nickname, targetNick],
@@ -183,16 +172,15 @@ async function startChat(targetUid, targetNick) {
     openChat(chatDocId, targetNick);
 }
 
-// Клик вне зоны поиска закрывает список
+// Клик вне зоны поиска
 document.addEventListener('click', (e) => {
     if (searchInput && !searchInput.contains(e.target) && !searchResultsArea.contains(e.target)) {
         searchResultsArea.style.display = 'none';
     }
 });
 
-// --- ОСТАЛЬНАЯ ЛОГИКА (ВХОД, СООБЩЕНИЯ) ---
+// --- ОСТАЛЬНАЯ ЛОГИКА ---
 
-// Навигация
 document.getElementById('logout-btn').addEventListener('click', () => signOut(auth));
 document.getElementById('to-register').addEventListener('click', () => {
     document.getElementById('login-form').style.display = 'none';
@@ -287,19 +275,15 @@ function loadMyChats() {
 // Сообщения
 function openChat(chatId, chatName) {
     currentChatId = chatId;
-    
     document.getElementById('chat-title').innerText = `КАНАЛ: ${chatName}`;
     document.getElementById('msg-form').style.display = 'flex'; 
     document.getElementById('messages-area').innerHTML = ''; 
-    
     chatPanel.classList.add('open');
-
-    // --- ДОБАВЛЕНО: Убираем фокус с поиска, чтобы на телефоне пропала клавиатура ---
+    
+    // Скрываем клавиатуру/поиск на мобильных
     if(searchInput) searchInput.blur(); 
-    // -------------------------------------------------------------------------------
 
     if (unsubscribeMessages) unsubscribeMessages();
-    
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "asc"));
     unsubscribeMessages = onSnapshot(q, (snap) => {
         const area = document.getElementById('messages-area');
@@ -322,25 +306,67 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
     input.value = '';
 });
 
+// --- ВАЖНОЕ ИСПРАВЛЕНИЕ: ОТРИСОВКА СООБЩЕНИЙ ---
+// Теперь кнопки создаются программно, а не строкой HTML
 function renderMessage(docSnap) {
     const msg = docSnap.data();
     const isMine = msg.senderId === auth.currentUser.uid;
+    
+    // Создаем контейнер сообщения
     const div = document.createElement('div');
     div.className = `msg ${isMine ? 'my' : 'other'}`;
+    
+    // Текст сообщения
+    const textDiv = document.createElement('div');
+    textDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
+    
+    // Мета-данные (время и кнопки)
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'msg-meta';
+    
+    // Добавляем кнопки управления ТОЛЬКО для своих сообщений
+    if (isMine) {
+        // Кнопка [E]dit
+        const editBtn = document.createElement('span');
+        editBtn.innerText = '[E]';
+        editBtn.style.cursor = 'pointer';
+        editBtn.style.marginRight = '8px';
+        editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text); // Событие напрямую
+
+        // Кнопка [X] Delete
+        const delBtn = document.createElement('span');
+        delBtn.innerText = '[X]';
+        delBtn.style.cursor = 'pointer';
+        delBtn.style.marginRight = '8px';
+        delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id); // Событие напрямую
+
+        metaDiv.appendChild(editBtn);
+        metaDiv.appendChild(delBtn);
+    }
+
+    // Время
+    const timeSpan = document.createElement('span');
     const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
-    const time = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
-    div.innerHTML = `
-        <div>${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}</div>
-        <div class="msg-meta">
-            ${isMine ? `<span onclick="editMsg('${currentChatId}','${docSnap.id}','${msg.text}')">[E]</span> <span onclick="deleteMsg('${currentChatId}','${docSnap.id}')">[X]</span>` : ''}
-            <span>${time}</span>
-        </div>`;
+    timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+    metaDiv.appendChild(timeSpan);
+
+    // Собираем всё вместе
+    div.appendChild(textDiv);
+    div.appendChild(metaDiv);
+    
     document.getElementById('messages-area').appendChild(div);
 }
 
-// Глобальные
-window.deleteMsg = async (cId, mId) => { if (await showModal('УДАЛИТЬ?', 'confirm')) await deleteDoc(doc(db, "chats", cId, "messages", mId)); };
-window.editMsg = async (cId, mId, old) => {
+// Функции управления сообщениями (Локальные)
+async function deleteMsg(cId, mId) { 
+    if (await showModal('УДАЛИТЬ?', 'confirm')) {
+        await deleteDoc(doc(db, "chats", cId, "messages", mId)); 
+    }
+}
+
+async function editMsg(cId, mId, old) {
     const val = await showModal('ИЗМЕНИТЬ:', 'prompt', old);
-    if (val && val !== old) await updateDoc(doc(db, "chats", cId, "messages", mId), { text: val, edited: true });
-};
+    if (val && val !== old) {
+        await updateDoc(doc(db, "chats", cId, "messages", mId), { text: val, edited: true });
+    }
+}
