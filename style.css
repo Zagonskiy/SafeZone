@@ -222,3 +222,30 @@ textarea.terminal-textarea { height: 80px; resize: none; }
     background: #111; /* Фон, пока грузится */
     flex-shrink: 0; /* Чтобы аватарка не сжималась */
 }
+
+/* Кнопка прикрепления фото */
+.btn-icon {
+    width: 50px;
+    height: 50px;
+    font-size: 1.5rem;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0;
+}
+
+/* Изображение внутри сообщения */
+.msg-image-content {
+    max-width: 100%;
+    max-height: 300px; /* Ограничение высоты */
+    border-radius: 5px;
+    margin-top: 5px;
+    border: 1px solid var(--text-green);
+    cursor: pointer;
+}
+
+/* Исправление, чтобы инпуты стояли ровно */
+.msg-input-area input {
+    border-left: 1px solid var(--text-dim); /* Вернем рамку, т.к. слева теперь кнопка */
+}
