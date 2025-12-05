@@ -168,12 +168,19 @@ input:focus { border-color: var(--text-green); box-shadow: 0 0 15px rgba(51, 255
 /* На телефоне показываем либо список, либо чат */
 .side-panel { width: 100%; height: 100%; }
 .main-panel { 
-    width: 100%; height: 100%; 
-    position: absolute; top: 0; left: 0; 
+    width: 100%; 
+    height: 100%; 
+    position: absolute; 
+    top: 0; 
+    left: 0; 
     background: var(--screen-bg); 
-    transform: translateX(100%); /* Скрыт справа */
-    transition: transform 0.3s ease;
-    z-index: 100;
+    
+    /* Скрыт справа по умолчанию */
+    transform: translateX(100%); 
+    transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1); /* Более плавная анимация */
+    
+    /* ВАЖНО: Ставим индекс выше, чем у поиска (1000) и результатов (2000) */
+    z-index: 5000; 
 }
 .main-panel.open { transform: translateX(0); } /* Выезжает */
 .mobile-only { display: inline-block; }
