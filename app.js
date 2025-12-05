@@ -390,25 +390,69 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     } catch (err) { showModal("ОШИБКА ДОСТУПА", 'alert'); }
 });
 
-// Список чатов
+// --- СПИСОК ЧАТОВ (С АВАТАРКАМИ) ---
 function loadMyChats() {
     if (!auth.currentUser) return;
-    const q = query(collection(db, "chats"), where("participants", "array-contains", auth.currentUser.uid), orderBy("lastUpdated", "desc"));
+    
+    // Запрос к базе: ищем чаты, где я есть, сортируем по свежести
+    const q = query(
+        collection(db, "chats"), 
+        where("participants", "array-contains", auth.currentUser.uid),
+        orderBy("lastUpdated", "desc")
+    );
+    
     unsubscribeChats = onSnapshot(q, (snap) => {
         const container = document.getElementById('chats-container');
-        container.innerHTML = '';
+        container.innerHTML = ''; // Очищаем список перед обновлением
+        
         if (snap.empty) {
             document.getElementById('empty-state').style.display = 'flex';
         } else {
             document.getElementById('empty-state').style.display = 'none';
-            snap.forEach(d => {
-                const data = d.data();
-                const name = data.participantNames.find(n => n !== currentUserData.nickname) || "UNKNOWN";
+            
+            snap.forEach(async docSnap => {
+                const data = docSnap.data();
+                
+                // 1. Ищем ID и Имя собеседника
+                const otherUid = data.participants.find(uid => uid !== auth.currentUser.uid);
+                const otherName = data.participantNames.find(n => n !== currentUserData.nickname) || "UNKNOWN";
+                
+                // 2. Создаем сам блок (ПРЯМОУГОЛЬНИК)
                 const el = document.createElement('div');
-                el.className = 'chat-item';
-                el.innerHTML = `<span>${name}</span>`;
-                el.onclick = () => openChat(d.id, name);
+                el.className = 'chat-item'; // <--- ВОТ ЗДЕСЬ МЫ ПРИСВАИВАЕМ КЛАСС
+                
+                // Уникальный ID для картинки, чтобы потом ее найти и обновить
+                const imgId = `avatar-chat-${docSnap.id}`;
+                
+                // 3. Вставляем HTML внутрь прямоугольника
+                el.innerHTML = `
+                    <img id="${imgId}" src="" class="chat-list-avatar" style="display:none">
+                    <div>${otherName}</div>
+                `;
+                
+                // Клик открывает чат
+                el.onclick = () => openChat(docSnap.id, otherName);
                 container.appendChild(el);
+
+                // 4. Отдельно подгружаем аватарку собеседника из его профиля
+                if (otherUid) {
+                    const userSnap = await getDoc(doc(db, "users", otherUid));
+                    if (userSnap.exists()) {
+                        const uData = userSnap.data();
+                        const imgEl = document.getElementById(imgId);
+                        
+                        // Если фото найдено и элемент еще существует
+                        if (imgEl && uData.avatarBase64) {
+                            imgEl.src = uData.avatarBase64;
+                            imgEl.style.display = 'block';
+                        } else if (imgEl) {
+                            // Если фото нет - показываем пустой серый круг
+                             imgEl.style.display = 'block';
+                             imgEl.style.backgroundColor = '#222';
+                             imgEl.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; // Пустой пиксель
+                        }
+                    }
+                }
             });
         }
     });
