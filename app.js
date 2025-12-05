@@ -119,18 +119,27 @@ if (msgInput) {
 }
 
 // ==========================================
-// === ЛОГИКА ЗАПИСИ (ГИБРИДНАЯ СИСТЕМА) ===
+// === ЛОГИКА ЗАПИСИ (ИСПРАВЛЕННАЯ v2.0) ===
 // ==========================================
 
 let recStartTimePress = 0; // Время начала нажатия
 let isRecording = false;   // Флаг: идет ли запись
-let isHoldMode = false;    // Флаг: режим удержания
+let isLockedMode = false;  // Флаг: режим "замок" (запись по клику)
+let detectedMimeType = ''; // Сюда сохраним формат аудио (webm/mp4)
 
+// 1. НАЧАЛО ЗАПИСИ
 const startRecording = async (e) => {
-    // Не блокируем стандартные события на ПК, но блокируем на телефоне, чтобы не выделялся текст
-    if(e.type === 'touchstart') e.preventDefault();
+    // На телефоне предотвращаем выделение и скролл при касании кнопки
+    if (e.type === 'touchstart') e.preventDefault();
     
-    if (isRecording) return; // Уже пишем
+    // Если уже пишем...
+    if (isRecording) {
+        // ...и это был режим "замка" (клик), а теперь нажали второй раз -> останавливаем
+        if (isLockedMode) {
+            stopAndSend();
+        }
+        return;
+    }
 
     recStartTimePress = Date.now();
     
@@ -142,21 +151,27 @@ const startRecording = async (e) => {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         
         mediaRecorder = new MediaRecorder(stream);
+        
+        // ВАЖНО: Запоминаем формат, который выбрал браузер (audio/webm или audio/mp4)
+        detectedMimeType = mediaRecorder.mimeType; 
         audioChunks = [];
 
         mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) audioChunks.push(event.data);
         };
 
-        // ВАЖНО: Настраиваем отправку ПЕРЕД стартом
+        // НАСТРОЙКА ОСТАНОВКИ (сработает, когда вызовем .stop())
         mediaRecorder.onstop = async () => {
-            // Выключаем лампочку микрофона
+            // Гасим лампочку микрофона
             mediaRecorder.stream.getTracks().forEach(track => track.stop());
             
-            const audioBlob = new Blob(audioChunks); 
+            // ВАЖНО: Создаем Blob с ТЕМ ЖЕ типом, что и рекордер. Это чинит "0 секунд".
+            // Если тип пустой (бывает в Safari), пробуем mp4, иначе webm
+            const finalType = detectedMimeType || 'audio/mp4'; 
+            const audioBlob = new Blob(audioChunks, { type: finalType });
             
-            // Защита от слишком коротких записей (менее 0.5 сек)
-            if (audioBlob.size < 500) return; 
+            // Защита от случайных нажатий (слишком короткие не шлем)
+            if (audioBlob.size < 1000) return; 
 
             const reader = new FileReader();
             reader.readAsDataURL(audioBlob);
@@ -181,82 +196,80 @@ const startRecording = async (e) => {
             };
         };
 
-        mediaRecorder.start();
+        // Старт (записываем кусочки каждые 100мс для надежности)
+        mediaRecorder.start(100); 
         isRecording = true;
+        isLockedMode = false; // Пока не знаем, замок это или удержание
         
         // Показываем оверлей
-        recordingOverlay.style.display = 'flex';
-        document.getElementById('rec-status-text').innerText = "ЗАПИСЬ...";
+        if(recordingOverlay) {
+            recordingOverlay.style.display = 'flex';
+            document.getElementById('rec-status-text').innerText = "ЗАПИСЬ...";
+        }
         
     } catch (err) {
         console.error("Mic Error:", err);
+        showModal("ОШИБКА ДОСТУПА К МИКРОФОНУ", "alert");
     }
 };
 
+// 2. ОБРАБОТКА ОТПУСКАНИЯ КНОПКИ
 const handleRelease = (e) => {
-    if(e.type === 'touchend') e.preventDefault();
+    if (e.type === 'touchend') e.preventDefault();
     
-    if (!isRecording) return;
+    if (!isRecording) return; // Если запись не идет, игнорируем
 
     const pressDuration = Date.now() - recStartTimePress;
 
-    // ЛОГИКА:
-    // Если держали меньше 500мс -> Это клик (Режим "ВКЛ/ВЫКЛ")
-    // Если держали больше 500мс -> Это удержание (Режим "PTT")
+    // ЛОГИКА ГИБРИДНОГО РЕЖИМА:
     
-    if (pressDuration < 500) {
-        // Это был клик.
-        // Если мы еще не в режиме постоянной записи, переходим в него.
-        // Но так как startRecording уже запустил запись, нам просто нужно сменить статус в UI
-        isHoldMode = false;
-        document.getElementById('rec-status-text').innerText = "НАЖМИТЕ ДЛЯ СТОПА";
-        // Кнопка меняет цвет или иконку, чтобы показать, что надо нажать еще раз
-        // (Визуально можно доработать, но пока оставим оверлей)
-        return; 
+    // А. Если нажатие было коротким (< 500мс) -> ВКЛЮЧАЕМ РЕЖИМ "ЗАМОК"
+    // Запись НЕ останавливается. Нужно нажать еще раз.
+    if (pressDuration < 500 && !isLockedMode) {
+        isLockedMode = true;
+        document.getElementById('rec-status-text').innerText = "НАЖМИТЕ ДЛЯ ОТПРАВКИ";
+        // Меняем цвет кнопки или иконку визуально, чтобы было понятно
+        if(btnMicRec) btnMicRec.style.border = "1px solid red"; 
+        return;
     }
 
-    // Если это было удержание - останавливаем сразу
-    stopAndSend();
-};
-
-// Функция остановки (вызывается либо при отпускании PTT, либо при втором клике)
-const stopAndSend = () => {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop(); // Это вызовет onstop, который мы определили выше
-    }
-    isRecording = false;
-    isHoldMode = false;
-    if(recordingOverlay) recordingOverlay.style.display = 'none';
-};
-
-// Обработчик второго клика (для остановки режима "ВКЛ/ВЫКЛ")
-const handleClickStop = (e) => {
-    // Если идет запись и это НЕ режим удержания (значит это был короткий клик ранее)
-    // То этот клик должен остановить запись
-    if (isRecording && !isHoldMode && (Date.now() - recStartTimePress > 500)) {
+    // Б. Если нажатие было долгим (> 500мс) -> ЭТО PUSH-TO-TALK
+    // Останавливаем и отправляем сразу.
+    if (!isLockedMode) {
         stopAndSend();
     }
 };
 
-// Привязываем события
+// 3. ФУНКЦИЯ ОСТАНОВКИ
+const stopAndSend = () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+    }
+    isRecording = false;
+    isLockedMode = false;
+    
+    // Сброс UI
+    if(recordingOverlay) recordingOverlay.style.display = 'none';
+    if(btnMicRec) btnMicRec.style.border = ""; // Возвращаем рамку
+};
+
+
+// 4. ПРИВЯЗКА СОБЫТИЙ
 if (btnMicRec) {
-    // Начало (Клик или Тач)
+    // Начало (Клик мышкой или Пальцем)
     btnMicRec.addEventListener('mousedown', startRecording);
     btnMicRec.addEventListener('touchstart', startRecording);
 
-    // Конец (Отпускание)
+    // Конец (Отпускание мыши или пальца)
     btnMicRec.addEventListener('mouseup', handleRelease);
     btnMicRec.addEventListener('touchend', handleRelease);
     
-    // Выход курсора (считаем как отпускание)
+    // Если увел мышку с кнопки во время удержания -> Отправляем
     btnMicRec.addEventListener('mouseleave', (e) => {
-        if (isRecording && (Date.now() - recStartTimePress > 500)) {
+        if (isRecording && !isLockedMode) {
             stopAndSend();
         }
     });
-    
-    // Дополнительный клик по кнопке (для остановки "постоянной" записи)
-    btnMicRec.addEventListener('click', handleClickStop);
 }
 
 // ==========================================
