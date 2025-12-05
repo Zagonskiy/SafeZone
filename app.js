@@ -553,23 +553,61 @@ btnAttachImg.addEventListener('click', () => {
     chatImgUpload.click();
 });
 
-// Когда файл выбран
-chatImgUpload.addEventListener('change', async (e) => {
+// --- ЛОГИКА ОТПРАВКИ ФОТО С ПРЕДПРОСМОТРОМ ---
+
+// Элементы модального окна превью
+const photoModal = document.getElementById('photo-preview-modal');
+const photoPreviewImg = document.getElementById('photo-preview-img');
+const photoCaptionInput = document.getElementById('photo-caption-input');
+const btnCancelPhoto = document.getElementById('btn-cancel-photo');
+const btnConfirmPhoto = document.getElementById('btn-confirm-photo');
+
+// Переменная для хранения выбранного файла
+let selectedFile = null;
+
+// 1. Когда файл выбран в проводнике
+chatImgUpload.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Спрашиваем подтверждение (защита от мисклика)
-    const confirmed = await showModal("ОТПРАВИТЬ ФОТОГРАФИЮ?", "confirm");
-    if (!confirmed) return;
+    selectedFile = file; // Запоминаем файл
+
+    // Читаем файл только для показа превью (без сжатия пока)
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        photoPreviewImg.src = event.target.result; // Показываем картинку
+        photoCaptionInput.value = ''; // Очищаем старую подпись
+        photoModal.classList.add('active'); // Открываем окно
+    };
+    reader.readAsDataURL(file);
+});
+
+// 2. Кнопка ОТМЕНА
+btnCancelPhoto.addEventListener('click', () => {
+    photoModal.classList.remove('active');
+    chatImgUpload.value = ''; // Сбрасываем инпут
+    selectedFile = null;
+});
+
+// 3. Кнопка ОТПРАВИТЬ (в модальном окне)
+btnConfirmPhoto.addEventListener('click', async () => {
+    if (!selectedFile || !currentChatId) return;
+
+    // Блокируем кнопку, чтобы не нажал дважды
+    btnConfirmPhoto.innerText = "СЖАТИЕ...";
+    btnConfirmPhoto.disabled = true;
 
     try {
         // Сжимаем
-        const base64 = await compressChatImage(file);
+        const base64 = await compressChatImage(selectedFile);
         
-        // Отправляем как сообщение
+        // Берем подпись (или ставим [ФОТО] если пусто)
+        const caption = photoCaptionInput.value.trim() || "[ФОТО]";
+
+        // Отправляем
         await addDoc(collection(db, "chats", currentChatId, "messages"), {
-            text: "[ФОТО]", // Текстовая заглушка
-            imageBase64: base64, // Само фото
+            text: caption, // ТЕПЕРЬ ТУТ ТВОЯ ПОДПИСЬ
+            imageBase64: base64,
             senderId: auth.currentUser.uid, 
             senderNick: currentUserData.nickname,
             senderAvatar: currentUserData.avatarBase64 || null,
@@ -579,12 +617,20 @@ chatImgUpload.addEventListener('change', async (e) => {
         
         await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
         
+        // Закрываем окно и чистим
+        photoModal.classList.remove('active');
+        chatImgUpload.value = '';
+        selectedFile = null;
+
     } catch (err) {
         console.error(err);
-        showModal("ОШИБКА: ФАЙЛ СЛИШКОМ БОЛЬШОЙ", "alert");
+        alert("ОШИБКА ОТПРАВКИ ФОТО"); // Используем alert для простоты тут, или showModal
+    } finally {
+        // Возвращаем кнопку в исходное состояние
+        btnConfirmPhoto.innerText = "ОТПРАВИТЬ";
+        btnConfirmPhoto.disabled = false;
     }
 });
-
 document.getElementById('msg-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const input = document.getElementById('msg-input');
