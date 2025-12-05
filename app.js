@@ -1,10 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { 
-    getAuth, 
-    createUserWithEmailAndPassword, 
-    signInWithEmailAndPassword, 
-    signOut, 
-    onAuthStateChanged 
+    getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged 
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { 
     getFirestore, doc, setDoc, collection, query, where, getDocs, getDoc,
@@ -26,22 +22,36 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Глобальные переменные
+// Глобальные
 let currentChatId = null;
 let unsubscribeMessages = null; 
 let unsubscribeChats = null; 
 let currentUserData = null; 
 let searchTimeout = null;
+let profileToEdit = null; // Для хранения ID профиля, который смотрим
 
 // --- DOM ЭЛЕМЕНТЫ ---
 const authScreen = document.getElementById('auth-screen');
 const appInterface = document.getElementById('app-interface');
 const chatPanel = document.getElementById('chat-screen');
 const userDisplay = document.getElementById('user-display');
+const myMiniAvatar = document.getElementById('my-mini-avatar');
+
 const searchInput = document.getElementById('search-nick');
 const searchIndicator = document.getElementById('search-indicator');
 const searchResultsArea = document.getElementById('search-results');
 const searchList = document.getElementById('search-list');
+
+// --- ПРОФИЛЬ ЭЛЕМЕНТЫ ---
+const profileModal = document.getElementById('profile-modal');
+const profileNickInput = document.getElementById('profile-nick-input');
+const profileDescInput = document.getElementById('profile-desc-input');
+const profileImgPreview = document.getElementById('profile-img-preview');
+const avatarPlaceholder = document.getElementById('avatar-placeholder');
+const avatarUpload = document.getElementById('avatar-upload');
+const btnUploadAvatar = document.getElementById('btn-upload-avatar');
+const btnSaveProfile = document.getElementById('btn-save-profile');
+const btnCloseProfile = document.getElementById('btn-close-profile');
 
 // --- УТИЛИТЫ (MODAL) ---
 const modalOverlay = document.getElementById('custom-modal');
@@ -71,21 +81,179 @@ function showModal(text, type = 'alert', placeholder = '') {
     });
 }
 
-// --- ЖИВОЙ ПОИСК (РАДАР) ---
+// ==========================================
+// === СИСТЕМА СЖАТИЯ ИЗОБРАЖЕНИЙ (Base64) ===
+// ==========================================
+function compressImage(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                // Ограничиваем размер до 300x300 пикселей (чтобы влезло в БД)
+                const MAX_WIDTH = 300;
+                const MAX_HEIGHT = 300;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                    if (width > MAX_WIDTH) {
+                        height *= MAX_WIDTH / width;
+                        width = MAX_WIDTH;
+                    }
+                } else {
+                    if (height > MAX_HEIGHT) {
+                        width *= MAX_HEIGHT / height;
+                        height = MAX_HEIGHT;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0, width, height);
+                // Сжимаем в JPEG с качеством 0.7
+                const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+                resolve(dataUrl);
+            };
+            img.onerror = (err) => reject(err);
+        };
+    });
+}
+
+// ==========================================
+// === ЛОГИКА ПРОФИЛЯ ===
+// ==========================================
+
+// Открытие моего профиля
+document.getElementById('my-profile-link').addEventListener('click', () => {
+    if(currentUserData) openProfile(currentUserData.uid, true);
+});
+
+// Загрузка фото (Кнопка)
+btnUploadAvatar.addEventListener('click', () => avatarUpload.click());
+avatarUpload.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        try {
+            const base64 = await compressImage(file);
+            profileImgPreview.src = base64;
+            profileImgPreview.style.display = 'block';
+            avatarPlaceholder.style.display = 'none';
+        } catch (err) {
+            showModal("ОШИБКА ОБРАБОТКИ ФОТО", "alert");
+        }
+    }
+});
+
+// Функция открытия профиля (свой или чужой)
+async function openProfile(uid, isMyProfile) {
+    profileToEdit = uid;
+    let data = null;
+
+    if (isMyProfile) {
+        data = currentUserData;
+    } else {
+        // Загружаем чужие данные
+        const snap = await getDoc(doc(db, "users", uid));
+        if (snap.exists()) data = snap.data();
+    }
+
+    if (!data) return showModal("БОЕЦ НЕ НАЙДЕН", "alert");
+
+    // Заполняем форму
+    profileNickInput.value = data.nickname || "Без имени";
+    profileDescInput.value = data.description || "";
+    
+    // Аватар
+    if (data.avatarBase64) {
+        profileImgPreview.src = data.avatarBase64;
+        profileImgPreview.style.display = 'block';
+        avatarPlaceholder.style.display = 'none';
+    } else {
+        profileImgPreview.src = "";
+        profileImgPreview.style.display = 'none';
+        avatarPlaceholder.style.display = 'flex';
+    }
+
+    // Режим редактирования
+    if (isMyProfile) {
+        profileNickInput.disabled = false;
+        profileDescInput.disabled = false;
+        btnUploadAvatar.style.display = 'inline-block';
+        btnSaveProfile.style.display = 'inline-block';
+    } else {
+        profileNickInput.disabled = true;
+        profileDescInput.disabled = true;
+        btnUploadAvatar.style.display = 'none';
+        btnSaveProfile.style.display = 'none';
+    }
+
+    profileModal.classList.add('active');
+}
+
+// Сохранение профиля
+btnSaveProfile.addEventListener('click', async () => {
+    const newNick = profileNickInput.value.trim();
+    const newDesc = profileDescInput.value.trim();
+    const newAvatar = profileImgPreview.src.startsWith('data:') ? profileImgPreview.src : null;
+
+    if (newNick.length < 3) return showModal("ПОЗЫВНОЙ СЛИШКОМ КОРОТКИЙ", "alert");
+
+    try {
+        await updateDoc(doc(db, "users", auth.currentUser.uid), {
+            nickname: newNick,
+            description: newDesc,
+            avatarBase64: newAvatar
+        });
+        
+        // Обновляем локальные данные
+        currentUserData.nickname = newNick;
+        currentUserData.description = newDesc;
+        currentUserData.avatarBase64 = newAvatar;
+        
+        updateMyDisplay(); // Обновить шапку
+        profileModal.classList.remove('active');
+        showModal("ДОСЬЕ ОБНОВЛЕНО", "alert");
+
+    } catch (err) {
+        console.error(err);
+        showModal("ОШИБКА СОХРАНЕНИЯ", "alert");
+    }
+});
+
+btnCloseProfile.addEventListener('click', () => profileModal.classList.remove('active'));
+
+// Обновление шапки (мой аватар и ник)
+function updateMyDisplay() {
+    if (currentUserData) {
+        userDisplay.innerText = `БОЕЦ: ${currentUserData.nickname}`;
+        if (currentUserData.avatarBase64) {
+            myMiniAvatar.src = currentUserData.avatarBase64;
+            myMiniAvatar.style.display = 'block';
+        } else {
+            myMiniAvatar.style.display = 'none';
+        }
+    }
+}
+
+// ==========================================
+// === ЖИВОЙ ПОИСК ===
+// ==========================================
 if (searchInput) {
     searchInput.addEventListener('input', (e) => {
         const text = e.target.value.trim();
-        
         if (!text) {
             searchResultsArea.style.display = 'none';
             if(searchIndicator) searchIndicator.classList.remove('active');
             return;
         }
-
         if(searchIndicator) searchIndicator.classList.add('active');
         searchResultsArea.style.display = 'block';
         searchList.innerHTML = '<div style="padding:15px; opacity:0.7;">>> СКАНИРОВАНИЕ...</div>';
-
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => executeSearch(text), 500);
     });
@@ -94,93 +262,67 @@ if (searchInput) {
 async function executeSearch(queryText) {
     try {
         const endText = queryText + '\uf8ff';
-        
-        const q = query(
-            collection(db, "users"),
-            orderBy("nickname"), 
-            where("nickname", ">=", queryText),
-            where("nickname", "<=", endText),
-            limit(3)
-        );
-
+        const q = query(collection(db, "users"), orderBy("nickname"), where("nickname", ">=", queryText), where("nickname", "<=", endText), limit(3));
         const snap = await getDocs(q);
-        renderSearchResults(snap, queryText);
-        
+        renderSearchResults(snap);
     } catch (error) {
-        console.error("ОШИБКА ПОИСКА:", error);
         let errorMsg = "СБОЙ СИСТЕМЫ";
-        if (error.message.includes("index")) {
-            errorMsg = "ТРЕБУЕТСЯ ИНДЕКС (СМ. КОНСОЛЬ F12)";
-        }
+        if (error.message && error.message.includes("index")) errorMsg = "ТРЕБУЕТСЯ ИНДЕКС (СМ. КОНСОЛЬ)";
         searchList.innerHTML = `<div style="padding:15px; color:red;">${errorMsg}</div>`;
     } finally {
         if(searchIndicator) searchIndicator.classList.remove('active');
     }
 }
 
-function renderSearchResults(snapshot, queryText) {
+function renderSearchResults(snapshot) {
     searchList.innerHTML = ''; 
-
     if (snapshot.empty) {
-        searchList.innerHTML = `
-            <div style="padding:15px; opacity:0.5; text-align:center;">
-                ЦЕЛЬ НЕ ОБНАРУЖЕНА<br>
-                <span style="font-size:0.7rem; color:red;">(Учитывайте регистр букв!)</span>
-            </div>`;
+        searchList.innerHTML = `<div style="padding:15px; opacity:0.5; text-align:center;">ЦЕЛЬ НЕ ОБНАРУЖЕНА<br><span style="font-size:0.7rem; color:red;">(Учитывайте регистр!)</span></div>`;
         return;
     }
-
     let count = 0;
     snapshot.forEach(docSnap => {
         const user = docSnap.data();
         const uid = docSnap.id;
-
         if (uid === auth.currentUser.uid) return; 
-
         count++;
         const item = document.createElement('div');
         item.className = 'search-item';
-        item.innerHTML = `
-            <span>${user.nickname}</span> 
-            <span style="font-size:0.8rem; opacity:0.6;">[СВЯЗАТЬСЯ]</span>
-        `;
+        // Если есть аватарка в поиске - показываем
+        const avatarHTML = user.avatarBase64 
+            ? `<img src="${user.avatarBase64}" style="width:20px; height:20px; border-radius:50%; margin-right:5px; vertical-align:middle;">` 
+            : '';
         
+        item.innerHTML = `<span>${avatarHTML}${user.nickname}</span> <span style="font-size:0.8rem; opacity:0.6;">[СВЯЗАТЬСЯ]</span>`;
         item.onclick = () => {
-            searchInput.value = '';
-            searchResultsArea.style.display = 'none';
+            searchInput.value = ''; searchResultsArea.style.display = 'none';
             startChat(uid, user.nickname);
         };
-        
         searchList.appendChild(item);
     });
-
-    if (count === 0) {
-        searchList.innerHTML = '<div style="padding:15px; opacity:0.5;">ТОЛЬКО ВЫ</div>';
-    }
+    if (count === 0) searchList.innerHTML = '<div style="padding:15px; opacity:0.5;">ТОЛЬКО ВЫ</div>';
 }
 
 // Создание Чата
 async function startChat(targetUid, targetNick) {
     const chatDocId = [auth.currentUser.uid, targetUid].sort().join("_");
-    
     await setDoc(doc(db, "chats", chatDocId), {
         participants: [auth.currentUser.uid, targetUid],
         participantNames: [currentUserData.nickname, targetNick],
         lastUpdated: serverTimestamp()
     }, { merge: true });
-
     openChat(chatDocId, targetNick);
 }
 
-// Клик вне зоны поиска
 document.addEventListener('click', (e) => {
     if (searchInput && !searchInput.contains(e.target) && !searchResultsArea.contains(e.target)) {
         searchResultsArea.style.display = 'none';
     }
 });
 
-// --- ОСТАЛЬНАЯ ЛОГИКА ---
-
+// ==========================================
+// === ОСНОВНАЯ ЛОГИКА ===
+// ==========================================
 document.getElementById('logout-btn').addEventListener('click', () => signOut(auth));
 document.getElementById('to-register').addEventListener('click', () => {
     document.getElementById('login-form').style.display = 'none';
@@ -208,7 +350,7 @@ onAuthStateChanged(auth, async (user) => {
             const snap = await getDoc(doc(db, "users", user.uid));
             if (snap.exists()) currentUserData = { uid: user.uid, ...snap.data() };
         }
-        userDisplay.innerText = currentUserData ? `БОЕЦ: ${currentUserData.nickname}` : `ID: UNKNOWN`;
+        updateMyDisplay(); // Обновить шапку
         loadMyChats();
     } else {
         appInterface.classList.add('hidden');
@@ -227,8 +369,8 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
         const q = query(collection(db, "users"), where("nickname", "==", nick));
         if (!(await getDocs(q)).empty) throw new Error("ПОЗЫВНОЙ ЗАНЯТ");
         const cred = await createUserWithEmailAndPassword(auth, email, pass);
-        await setDoc(doc(db, "users", cred.user.uid), { nickname: nick, email, createdAt: new Date() });
-        currentUserData = { uid: cred.user.uid, nickname: nick, email };
+        await setDoc(doc(db, "users", cred.user.uid), { nickname: nick, email, createdAt: new Date(), avatarBase64: null, description: "" });
+        currentUserData = { uid: cred.user.uid, nickname: nick, email, avatarBase64: null, description: "" };
     } catch (err) { showModal(err.message, 'alert'); }
 });
 
@@ -279,15 +421,15 @@ function openChat(chatId, chatName) {
     document.getElementById('msg-form').style.display = 'flex'; 
     document.getElementById('messages-area').innerHTML = ''; 
     chatPanel.classList.add('open');
-    
-    // Скрываем клавиатуру/поиск на мобильных
     if(searchInput) searchInput.blur(); 
-
     if (unsubscribeMessages) unsubscribeMessages();
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "asc"));
     unsubscribeMessages = onSnapshot(q, (snap) => {
         const area = document.getElementById('messages-area');
         area.innerHTML = '';
+        // ВАЖНО: Мы получаем всех пользователей чата, чтобы найти их аватарки
+        // Для простоты, пока рендерим без аватарок (или аватарки надо хранить в самом сообщении)
+        // Чтобы сделать красиво, сохраним аватар в сообщении при отправке.
         snap.forEach(renderMessage);
         area.scrollTop = area.scrollHeight;
     });
@@ -299,74 +441,87 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
     const text = input.value.trim();
     if (!text || !currentChatId) return;
     await addDoc(collection(db, "chats", currentChatId, "messages"), {
-        text, senderId: auth.currentUser.uid, senderNick: currentUserData.nickname,
-        createdAt: serverTimestamp(), edited: false
+        text, 
+        senderId: auth.currentUser.uid, 
+        senderNick: currentUserData.nickname,
+        // Добавляем аватарку в сообщение, чтобы не грузить её каждый раз
+        senderAvatar: currentUserData.avatarBase64 || null, 
+        createdAt: serverTimestamp(), 
+        edited: false
     });
     await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
     input.value = '';
 });
 
-// --- ВАЖНОЕ ИСПРАВЛЕНИЕ: ОТРИСОВКА СООБЩЕНИЙ ---
-// Теперь кнопки создаются программно, а не строкой HTML
 function renderMessage(docSnap) {
     const msg = docSnap.data();
     const isMine = msg.senderId === auth.currentUser.uid;
     
-    // Создаем контейнер сообщения
+    // Контейнер строки (чтобы аватар был рядом)
+    const row = document.createElement('div');
+    row.className = `msg-row ${isMine ? 'my' : 'other'}`;
+
+    // Аватарка (только если чужое сообщение)
+    if (!isMine) {
+        const avatar = document.createElement('img');
+        avatar.className = 'chat-avatar';
+        // Если есть аватарка в сообщении - ставим, если нет - заглушка
+        if (msg.senderAvatar) {
+            avatar.src = msg.senderAvatar;
+        } else {
+            // Генерируем цветной кружок или пустую картинку
+            avatar.style.background = '#333';
+        }
+        // Клик по аватарке -> Профиль
+        avatar.onclick = () => openProfile(msg.senderId, false);
+        row.appendChild(avatar);
+    }
+
     const div = document.createElement('div');
     div.className = `msg ${isMine ? 'my' : 'other'}`;
     
-    // Текст сообщения
     const textDiv = document.createElement('div');
     textDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
     
-    // Мета-данные (время и кнопки)
+    // Клик по НИКУ -> Профиль (добавим имя над сообщением если это не я)
+    if (!isMine) {
+        const nickSpan = document.createElement('div');
+        nickSpan.style.fontSize = '0.7rem';
+        nickSpan.style.marginBottom = '2px';
+        nickSpan.style.color = '#fff';
+        nickSpan.style.cursor = 'pointer';
+        nickSpan.style.textDecoration = 'underline';
+        nickSpan.innerText = msg.senderNick;
+        nickSpan.onclick = () => openProfile(msg.senderId, false);
+        div.prepend(nickSpan);
+    }
+
     const metaDiv = document.createElement('div');
     metaDiv.className = 'msg-meta';
     
-    // Добавляем кнопки управления ТОЛЬКО для своих сообщений
     if (isMine) {
-        // Кнопка [E]dit
         const editBtn = document.createElement('span');
-        editBtn.innerText = '[E]';
-        editBtn.style.cursor = 'pointer';
-        editBtn.style.marginRight = '8px';
-        editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text); // Событие напрямую
-
-        // Кнопка [X] Delete
+        editBtn.innerText = '[E]'; editBtn.style.cursor = 'pointer'; editBtn.style.marginRight = '8px';
+        editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
         const delBtn = document.createElement('span');
-        delBtn.innerText = '[X]';
-        delBtn.style.cursor = 'pointer';
-        delBtn.style.marginRight = '8px';
-        delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id); // Событие напрямую
-
-        metaDiv.appendChild(editBtn);
-        metaDiv.appendChild(delBtn);
+        delBtn.innerText = '[X]'; delBtn.style.cursor = 'pointer'; delBtn.style.marginRight = '8px';
+        delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id);
+        metaDiv.appendChild(editBtn); metaDiv.appendChild(delBtn);
     }
 
-    // Время
     const timeSpan = document.createElement('span');
     const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
     timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
     metaDiv.appendChild(timeSpan);
-
-    // Собираем всё вместе
-    div.appendChild(textDiv);
-    div.appendChild(metaDiv);
+    div.appendChild(textDiv); div.appendChild(metaDiv);
+    row.appendChild(div);
     
-    document.getElementById('messages-area').appendChild(div);
+    document.getElementById('messages-area').appendChild(row);
 }
 
-// Функции управления сообщениями (Локальные)
-async function deleteMsg(cId, mId) { 
-    if (await showModal('УДАЛИТЬ?', 'confirm')) {
-        await deleteDoc(doc(db, "chats", cId, "messages", mId)); 
-    }
-}
-
-async function editMsg(cId, mId, old) {
+// Глобальные функции
+window.deleteMsg = async (cId, mId) => { if (await showModal('УДАЛИТЬ?', 'confirm')) await deleteDoc(doc(db, "chats", cId, "messages", mId)); };
+window.editMsg = async (cId, mId, old) => {
     const val = await showModal('ИЗМЕНИТЬ:', 'prompt', old);
-    if (val && val !== old) {
-        await updateDoc(doc(db, "chats", cId, "messages", mId), { text: val, edited: true });
-    }
-}
+    if (val && val !== old) await updateDoc(doc(db, "chats", cId, "messages", mId), { text: val, edited: true });
+};
