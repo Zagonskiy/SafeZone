@@ -108,7 +108,7 @@ input:focus { border-color: var(--text-green); box-shadow: 0 0 15px rgba(51, 255
 }
 
 .input-wrapper {
-    position: relative;
+    position: relative; /* Это обязательно, чтобы список висел под полем */
     width: 100%;
 }
 
