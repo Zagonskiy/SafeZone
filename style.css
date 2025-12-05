@@ -100,11 +100,57 @@ input:focus { border-color: var(--text-green); box-shadow: 0 0 15px rgba(51, 255
 .msg-input-area input { border: none; height: 50px; }
 .btn-send { width: 60px; margin: 0; border: none; border-left: 1px solid var(--text-dim); height: 50px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;}
 
-/* ПОИСК */
-.search-panel { display: flex; gap: 5px; margin-bottom: 10px; }
-.search-results-area { border: 1px solid var(--text-dim); padding: 5px; margin-bottom: 10px; background: #000; }
-.search-item { padding: 10px; border-bottom: 1px solid #333; cursor: pointer; display: flex; justify-content: space-between; }
-.search-item:hover { background: #111; color: #fff; }
+/* --- АКТИВНЫЙ ПОИСК --- */
+.search-panel {
+    position: relative;
+    margin-bottom: 0; /* Убираем отступ, так как результаты "прилипнут" снизу */
+    z-index: 500;
+}
+
+.input-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+/* Поле поиска теперь с иконкой радара внутри (через CSS) */
+#search-nick {
+    width: 100%;
+    border-bottom: none; /* Убираем нижнюю границу, если открыт список */
+    transition: 0.1s;
+}
+
+/* Индикатор работы (мигающий курсор/точка справа) */
+.typing-indicator {
+    position: absolute;
+    right: 10px; top: 15px;
+    width: 8px; height: 8px;
+    background: var(--text-green);
+    border-radius: 50%;
+    opacity: 0;
+    transition: 0.2s;
+}
+.typing-indicator.active { opacity: 1; box-shadow: 0 0 5px var(--text-green); }
+
+/* Выпадающий список результатов */
+.search-results-area {
+    position: absolute; /* Повисает поверх контента */
+    top: 100%; left: 0; right: 0;
+    background: #000;
+    border: 1px solid var(--text-dim);
+    border-top: 1px dashed var(--text-dim);
+    z-index: 600;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.9);
+}
+
+.search-item {
+    padding: 12px;
+    border-bottom: 1px solid #222;
+    cursor: pointer;
+    display: flex; justify-content: space-between;
+    transition: 0.2s;
+}
+.search-item:hover { background: #111; color: #fff; padding-left: 15px; }
+.search-item:last-child { border-bottom: none; }
 
 /* МОДАЛКА */
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 2000; display: none; justify-content: center; align-items: center; backdrop-filter: blur(3px); }
