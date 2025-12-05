@@ -97,11 +97,25 @@
                     <form id="msg-form" class="msg-input-area" style="display: none;">
                         <input type="file" id="chat-img-upload" accept="image/*" style="display:none">
                         
-                        <button type="button" id="btn-attach-img" class="btn-metal btn-icon" style="margin-right:0; border-right:none;">+</button>
-                        
-                        <input type="text" id="msg-input" placeholder="ШИФРОВКА..." autocomplete="off">
-                        
-                        <button type="submit" class="btn-metal btn-send">></button>
+                        <div id="recording-panel" class="recording-ui" style="display: none;">
+                            <div class="rec-indicator">
+                                <div class="rec-dot"></div>
+                                <span id="rec-timer">00:00</span>
+                            </div>
+                            <div class="rec-actions">
+                                <button type="button" id="btn-cancel-rec" class="btn-small text-red">ОТМЕНА</button>
+                                <button type="button" id="btn-send-rec" class="btn-metal btn-icon-small">✓</button>
+                            </div>
+                        </div>
+
+                        <div id="standard-panel" class="input-row">
+                            <button type="button" id="btn-attach-img" class="btn-metal btn-icon" style="margin-right:0; border-right:none;">+</button>
+                            <button type="button" id="btn-mic-rec" class="btn-metal btn-icon" style="border-left:1px solid #333;">🎤</button>
+                            
+                            <input type="text" id="msg-input" placeholder="ШИФРОВКА..." autocomplete="off">
+                            
+                            <button type="submit" class="btn-metal btn-send">></button>
+                        </div>
                     </form>
                 </div>
             </div> 
