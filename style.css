@@ -423,23 +423,54 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 .text-red { color: var(--alert-red); border-color: var(--alert-red); }
 .btn-icon-small { width: 40px; height: 35px; padding: 0; display: flex; align-items: center; justify-content: center; margin: 0; }
 
-/* Аудио плеер в чате */
+/* --- СТИЛИЗАЦИЯ АУДИО ПЛЕЕРА (ТЕРМИНАЛ) --- */
+
 .audio-player-wrapper {
-    margin-top: 5px;
-    width: 250px;
-    height: 40px;
-    background: #111;
+    margin-top: 4px;
+    width: 220px; /* Компактный размер */
+    height: 34px; /* Низкий профиль */
+    background: #050505; /* Почти черный фон */
+
+    /* Рубленые углы и тактическая рамка */
     border: 1px solid var(--text-dim);
-    border-radius: 20px;
+    border-left: 4px solid var(--text-green); /* Акцент "активно" слева */
+    border-radius: 2px; /* Едва заметное скругление */
+
     display: flex;
     align-items: center;
     overflow: hidden;
+    position: relative; /* Для наложения сетки */
+    box-shadow: inset 0 0 5px rgba(0,0,0,0.8);
 }
 
-/* Кастомизация стандартного плеера (насколько возможно) */
+/* Декоративная сетка-сканер поверх плеера */
+.audio-player-wrapper::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    /* Вертикальные линии */
+    background-image: linear-gradient(90deg, transparent 95%, rgba(26, 128, 26, 0.2) 5%);
+    background-size: 10px 100%;
+    pointer-events: none; /* Чтобы можно было нажимать кнопки сквозь сетку */
+    z-index: 2;
+}
+
+/* Стандартный плеер (Цветовой взлом) */
 audio {
-    width: 100%;
+    width: 105%; /* Чуть шире контейнера, чтобы скрыть родные рамки браузера */
     height: 100%;
-    filter: invert(1) hue-rotate(90deg); /* Делаем плеер зеленым/темным */
+    
+    /* Сложный фильтр для придания кислотно-зеленого цвета */
+    /* Работает по-разному в разных браузерах, но в целом дает нужный эффект */
+    filter: invert(0.9) sepia(1) hue-rotate(85deg) saturate(2) brightness(0.9) contrast(1.2);
+    
     outline: none;
+    position: relative;
+    z-index: 1; /* Под сеткой, но над фоном */
+    margin-left: -5px; /* Центровка после увеличения ширины */
+}
+
+/* Хак для Chrome, чтобы убрать белый фон контролов */
+audio::-webkit-media-controls-enclosure {
+    background-color: transparent !important;
 }
