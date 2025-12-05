@@ -76,9 +76,13 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 }
 
 .chat-avatar {
-    width: 30px; height: 30px; 
-    border-radius: 50%; border: 1px solid var(--text-dim);
-    object-fit: cover; margin-right: 8px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid var(--text-green);
+    object-fit: cover;
+    margin-right: 10px; /* Отступ от аватарки до текста */
+    flex-shrink: 0;
     cursor: pointer;
 }
 
@@ -110,7 +114,13 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 .messages-container { flex: 1; overflow-y: auto; padding: 10px; background: rgba(0,0,0,0.2); border: 1px solid #222; display: flex; flex-direction: column; gap: 8px; }
 .no-chat-selected { height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.5; }
 
-.msg-row { display: flex; align-items: flex-end; width: 100%; }
+.msg-row {
+    display: flex;
+    align-items: flex-end; /* Аватарка внизу сообщения */
+    margin-bottom: 10px;
+    width: 100%;
+}
+
 .msg-row.my { justify-content: flex-end; }
 .msg-row.other { justify-content: flex-start; }
 
