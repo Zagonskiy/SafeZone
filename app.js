@@ -119,12 +119,20 @@ if (msgInput) {
 }
 
 // ==========================================
-// === ЛОГИКА ЗАПИСИ (PUSH-TO-TALK) ===
+// === ЛОГИКА ЗАПИСИ (ГИБРИДНАЯ СИСТЕМА) ===
 // ==========================================
 
+let recStartTimePress = 0; // Время начала нажатия
+let isRecording = false;   // Флаг: идет ли запись
+let isHoldMode = false;    // Флаг: режим удержания
+
 const startRecording = async (e) => {
-    // Предотвращаем выделение текста на телефоне
-    if(e.cancelable) e.preventDefault(); 
+    // Не блокируем стандартные события на ПК, но блокируем на телефоне, чтобы не выделялся текст
+    if(e.type === 'touchstart') e.preventDefault();
+    
+    if (isRecording) return; // Уже пишем
+
+    recStartTimePress = Date.now();
     
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         return alert("Микрофон недоступен");
@@ -133,9 +141,6 @@ const startRecording = async (e) => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         
-        // ВАЖНО: Убрали mimeType options для совместимости. 
-        // Браузер сам выберет лучший формат (mp4/aac для iOS, webm для Android), 
-        // что исправит проблему с кривым временем.
         mediaRecorder = new MediaRecorder(stream);
         audioChunks = [];
 
@@ -143,71 +148,115 @@ const startRecording = async (e) => {
             if (event.data.size > 0) audioChunks.push(event.data);
         };
 
+        // ВАЖНО: Настраиваем отправку ПЕРЕД стартом
+        mediaRecorder.onstop = async () => {
+            // Выключаем лампочку микрофона
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            
+            const audioBlob = new Blob(audioChunks); 
+            
+            // Защита от слишком коротких записей (менее 0.5 сек)
+            if (audioBlob.size < 500) return; 
+
+            const reader = new FileReader();
+            reader.readAsDataURL(audioBlob);
+            reader.onloadend = async () => {
+                const base64Audio = reader.result;
+                try {
+                    await addDoc(collection(db, "chats", currentChatId, "messages"), {
+                        text: "[ГОЛОСОВОЕ]",
+                        audioBase64: base64Audio,
+                        senderId: auth.currentUser.uid, 
+                        senderNick: currentUserData.nickname,
+                        senderAvatar: currentUserData.avatarBase64 || null,
+                        createdAt: serverTimestamp(), 
+                        edited: false,
+                        read: false
+                    });
+                    await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
+                } catch (e) {
+                    console.error(e);
+                    showModal("СБОЙ ОТПРАВКИ", "alert");
+                }
+            };
+        };
+
         mediaRecorder.start();
+        isRecording = true;
         
-        // Показываем оверлей "ЗАПИСЬ..."
-        if(recordingOverlay) recordingOverlay.style.display = 'flex';
+        // Показываем оверлей
+        recordingOverlay.style.display = 'flex';
+        document.getElementById('rec-status-text').innerText = "ЗАПИСЬ...";
         
     } catch (err) {
         console.error("Mic Error:", err);
     }
 };
 
-const stopAndSendRecording = (e) => {
-    if(e.cancelable) e.preventDefault();
+const handleRelease = (e) => {
+    if(e.type === 'touchend') e.preventDefault();
     
-    if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+    if (!isRecording) return;
 
-    mediaRecorder.stop();
-    // Выключаем лампочку использования микрофона в браузере
-    mediaRecorder.stream.getTracks().forEach(track => track.stop()); 
+    const pressDuration = Date.now() - recStartTimePress;
+
+    // ЛОГИКА:
+    // Если держали меньше 500мс -> Это клик (Режим "ВКЛ/ВЫКЛ")
+    // Если держали больше 500мс -> Это удержание (Режим "PTT")
     
-    // Скрываем оверлей
-    if(recordingOverlay) recordingOverlay.style.display = 'none';
+    if (pressDuration < 500) {
+        // Это был клик.
+        // Если мы еще не в режиме постоянной записи, переходим в него.
+        // Но так как startRecording уже запустил запись, нам просто нужно сменить статус в UI
+        isHoldMode = false;
+        document.getElementById('rec-status-text').innerText = "НАЖМИТЕ ДЛЯ СТОПА";
+        // Кнопка меняет цвет или иконку, чтобы показать, что надо нажать еще раз
+        // (Визуально можно доработать, но пока оставим оверлей)
+        return; 
+    }
 
-    mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunks); // Тип определится автоматически
-        
-        // Защита от случайных нажатий (слишком короткие не шлем)
-        if (audioBlob.size < 1000) return; 
-
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = async () => {
-            const base64Audio = reader.result;
-            
-            try {
-                await addDoc(collection(db, "chats", currentChatId, "messages"), {
-                    text: "[ГОЛОСОВОЕ]",
-                    audioBase64: base64Audio,
-                    senderId: auth.currentUser.uid, 
-                    senderNick: currentUserData.nickname,
-                    senderAvatar: currentUserData.avatarBase64 || null,
-                    createdAt: serverTimestamp(), 
-                    edited: false,
-                    read: false
-                });
-                
-                await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
-                
-            } catch (e) {
-                console.error(e);
-                showModal("СБОЙ ОТПРАВКИ АУДИО", "alert");
-            }
-        };
-    };
+    // Если это было удержание - останавливаем сразу
+    stopAndSend();
 };
 
-// Привязываем события к кнопке микрофона
-if (btnMicRec) {
-    // Для ПК
-    btnMicRec.addEventListener('mousedown', startRecording);
-    btnMicRec.addEventListener('mouseup', stopAndSendRecording);
-    btnMicRec.addEventListener('mouseleave', stopAndSendRecording); // Если увел курсор
+// Функция остановки (вызывается либо при отпускании PTT, либо при втором клике)
+const stopAndSend = () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop(); // Это вызовет onstop, который мы определили выше
+    }
+    isRecording = false;
+    isHoldMode = false;
+    if(recordingOverlay) recordingOverlay.style.display = 'none';
+};
 
-    // Для Телефонов
+// Обработчик второго клика (для остановки режима "ВКЛ/ВЫКЛ")
+const handleClickStop = (e) => {
+    // Если идет запись и это НЕ режим удержания (значит это был короткий клик ранее)
+    // То этот клик должен остановить запись
+    if (isRecording && !isHoldMode && (Date.now() - recStartTimePress > 500)) {
+        stopAndSend();
+    }
+};
+
+// Привязываем события
+if (btnMicRec) {
+    // Начало (Клик или Тач)
+    btnMicRec.addEventListener('mousedown', startRecording);
     btnMicRec.addEventListener('touchstart', startRecording);
-    btnMicRec.addEventListener('touchend', stopAndSendRecording);
+
+    // Конец (Отпускание)
+    btnMicRec.addEventListener('mouseup', handleRelease);
+    btnMicRec.addEventListener('touchend', handleRelease);
+    
+    // Выход курсора (считаем как отпускание)
+    btnMicRec.addEventListener('mouseleave', (e) => {
+        if (isRecording && (Date.now() - recStartTimePress > 500)) {
+            stopAndSend();
+        }
+    });
+    
+    // Дополнительный клик по кнопке (для остановки "постоянной" записи)
+    btnMicRec.addEventListener('click', handleClickStop);
 }
 
 // ==========================================
