@@ -149,5 +149,25 @@
     </div>
 
     <script type="module" src="app.js"></script>
+
+    <div id="photo-preview-modal" class="modal-overlay" style="z-index: 15000;">
+        <div class="modal-box" style="width: 400px; max-width: 90%;">
+            <div class="modal-title">/// ПОДТВЕРЖДЕНИЕ ДАННЫХ ///</div>
+            
+            <div class="preview-container">
+                <img id="photo-preview-img" src="" alt="Preview">
+            </div>
+
+            <div class="input-group">
+                <label>ПОДПИСЬ К СНИМКУ</label>
+                <input type="text" id="photo-caption-input" placeholder="Введите описание..." autocomplete="off">
+            </div>
+
+            <div class="modal-actions">
+                <button id="btn-cancel-photo" class="btn-small">ОТМЕНА</button>
+                <button id="btn-confirm-photo" class="btn-metal">ОТПРАВИТЬ</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
