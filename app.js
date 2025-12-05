@@ -499,9 +499,10 @@ function loadMyChats() {
 }
 
 // --- ОТКРЫТИЕ ЧАТА (ИСПРАВЛЕНО) ---
+// --- ОТКРЫТИЕ ЧАТА (С ФУНКЦИЕЙ ПРОЧТЕНИЯ) ---
 async function openChat(chatId, chatName) {
     currentChatId = chatId;
-    currentChatPartnerAvatar = null; // Сбрасываем старое фото
+    currentChatPartnerAvatar = null;
     
     document.getElementById('chat-title').innerText = `КАНАЛ: ${chatName}`;
     document.getElementById('msg-form').style.display = 'flex'; 
@@ -510,14 +511,12 @@ async function openChat(chatId, chatName) {
     chatPanel.classList.add('open');
     if(searchInput) searchInput.blur(); 
 
-    // 1. Сначала узнаем ID собеседника и качаем его актуальную аватарку
+    // 1. Грузим аватар собеседника
     try {
         const chatSnap = await getDoc(doc(db, "chats", chatId));
         if (chatSnap.exists()) {
             const participants = chatSnap.data().participants;
-            // Находим ID того, кто НЕ я
             const partnerUid = participants.find(uid => uid !== auth.currentUser.uid);
-            
             if (partnerUid) {
                 const userSnap = await getDoc(doc(db, "users", partnerUid));
                 if (userSnap.exists() && userSnap.data().avatarBase64) {
@@ -525,25 +524,33 @@ async function openChat(chatId, chatName) {
                 }
             }
         }
-    } catch (e) {
-        console.error("Ошибка загрузки профиля собеседника", e);
-    }
+    } catch (e) { console.error(e); }
 
-    // 2. Теперь запускаем прослушку сообщений
+    // 2. Слушаем сообщения
     if (unsubscribeMessages) unsubscribeMessages();
     
+    // ВАЖНО: Мы включаем includeMetadataChanges: true, чтобы видеть состояние "Часики" (pending writes)
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "asc"));
     
-    unsubscribeMessages = onSnapshot(q, (snap) => {
+    unsubscribeMessages = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
         const area = document.getElementById('messages-area');
         area.innerHTML = '';
-        snap.forEach(renderMessage);
         
-        // --- АВТО-СКРОЛЛ ВНИЗ (ОБНОВЛЕНО) ---
-        // Небольшая задержка (10мс) помогает браузеру успеть отрисовать картинки перед скроллом
-        setTimeout(() => {
-            area.scrollTop = area.scrollHeight;
-        }, 10);
+        snap.forEach((docSnap) => {
+            const msg = docSnap.data();
+            
+            // ЛОГИКА ПРОЧТЕНИЯ:
+            // Если сообщение чужое И оно не прочитано И оно уже на сервере (не в кеше) -> Помечаем прочитанным
+            if (msg.senderId !== auth.currentUser.uid && !msg.read && !docSnap.metadata.hasPendingWrites) {
+                // Делаем это тихо, без await, чтобы не тормозить интерфейс
+                updateDoc(doc(db, "chats", chatId, "messages", docSnap.id), { read: true });
+            }
+
+            renderMessage(docSnap);
+        });
+        
+        // Автоскролл
+        setTimeout(() => { area.scrollTop = area.scrollHeight; }, 10);
     });
 }
 
@@ -613,6 +620,7 @@ btnConfirmPhoto.addEventListener('click', async () => {
             senderAvatar: currentUserData.avatarBase64 || null,
             createdAt: serverTimestamp(), 
             edited: false
+            read: false // <--- НОВОЕ ПОЛЕ: Изначально не прочитано
         });
         
         await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
@@ -644,6 +652,7 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
         senderAvatar: currentUserData.avatarBase64 || null, 
         createdAt: serverTimestamp(), 
         edited: false
+        read: false // <--- НОВОЕ ПОЛЕ: Изначально не прочитано
     });
     await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
     input.value = '';
@@ -656,21 +665,107 @@ function renderMessage(docSnap) {
     const row = document.createElement('div');
     row.className = `msg-row ${isMine ? 'my' : 'other'}`;
 
-    // АВАТАРКА (для чужих)
+    // Аватарка (для чужих)
     if (!isMine) {
         const avatar = document.createElement('img');
         avatar.className = 'chat-avatar';
-        if (currentChatPartnerAvatar) {
-            avatar.src = currentChatPartnerAvatar;
-        } else if (msg.senderAvatar) {
-            avatar.src = msg.senderAvatar;
-        } else {
+        if (currentChatPartnerAvatar) avatar.src = currentChatPartnerAvatar;
+        else if (msg.senderAvatar) avatar.src = msg.senderAvatar;
+        else {
             avatar.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; 
             avatar.style.backgroundColor = '#333';
         }
         avatar.onclick = () => openProfile(msg.senderId, false);
         row.appendChild(avatar);
     }
+
+    // Сообщение
+    const div = document.createElement('div');
+    div.className = `msg ${isMine ? 'my' : 'other'}`;
+    
+    // Имя (для чужих)
+    if (!isMine) {
+        const nickSpan = document.createElement('div');
+        nickSpan.innerText = msg.senderNick;
+        nickSpan.style.fontSize = '0.7rem'; nickSpan.style.color = '#888'; 
+        nickSpan.style.cursor = 'pointer';
+        nickSpan.onclick = () => openProfile(msg.senderId, false);
+        div.appendChild(nickSpan);
+    }
+
+    // Контент (Текст или Фото)
+    const contentDiv = document.createElement('div');
+    if (msg.imageBase64) {
+        const img = document.createElement('img');
+        img.src = msg.imageBase64;
+        img.className = 'msg-image-content';
+        img.onclick = () => { const win = window.open(); win.document.write('<img src="' + msg.imageBase64 + '" style="width:100%">'); };
+        contentDiv.appendChild(img);
+        if(msg.text && msg.text !== "[ФОТО]") {
+            const caption = document.createElement('div');
+            caption.innerText = msg.text; caption.style.marginTop = "5px";
+            contentDiv.appendChild(caption);
+        }
+    } else {
+        contentDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
+    }
+    div.appendChild(contentDiv);
+
+    // Мета-данные (Время + Статус)
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'msg-meta';
+    
+    // Кнопки управления (свои)
+    if (isMine && !msg.imageBase64) {
+        const editBtn = document.createElement('span');
+        editBtn.innerText = '[E]'; editBtn.style.cursor = 'pointer'; editBtn.style.marginRight = '5px';
+        editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
+        metaDiv.appendChild(editBtn);
+    }
+    if (isMine) {
+        const delBtn = document.createElement('span');
+        delBtn.innerText = '[X]'; delBtn.style.cursor = 'pointer'; delBtn.style.marginRight = '5px';
+        delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id);
+        metaDiv.appendChild(delBtn);
+    }
+
+    // Время
+    const timeSpan = document.createElement('span');
+    const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
+    timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+    metaDiv.appendChild(timeSpan);
+
+    // --- ИНДИКАТОРЫ СТАТУСА (ТОЛЬКО ДЛЯ СВОИХ) ---
+    if (isMine) {
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'msg-status';
+        
+        // 1. Проверяем метаданные Firebase (pending writes)
+        if (docSnap.metadata.hasPendingWrites) {
+            // Сообщение еще не на сервере (Часики)
+            statusSpan.innerHTML = '🕒'; 
+            statusSpan.className += ' status-wait';
+            statusSpan.title = "Отправка...";
+        } else if (msg.read) {
+            // Прочитано (Две галочки)
+            statusSpan.innerHTML = '✓✓';
+            statusSpan.className += ' status-read';
+            statusSpan.title = "Прочитано";
+        } else {
+            // Отправлено, но не прочитано (Одна галочка)
+            statusSpan.innerHTML = '✓';
+            statusSpan.className += ' status-sent';
+            statusSpan.title = "Доставлено";
+        }
+        metaDiv.appendChild(statusSpan);
+    }
+    // ---------------------------------------------
+
+    div.appendChild(metaDiv);
+    row.appendChild(div);
+    
+    document.getElementById('messages-area').appendChild(row);
+}
 
     // ТЕЛО СООБЩЕНИЯ
     const div = document.createElement('div');
