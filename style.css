@@ -423,29 +423,29 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 .text-red { color: var(--alert-red); border-color: var(--alert-red); }
 .btn-icon-small { width: 40px; height: 35px; padding: 0; display: flex; align-items: center; justify-content: center; margin: 0; }
 
-/* --- СТИЛИЗАЦИЯ АУДИО ПЛЕЕРА (ТЕРМИНАЛ v2.0) --- */
+/* --- СТИЛИЗАЦИЯ АУДИО ПЛЕЕРА (ТЕРМИНАЛ v3.0) --- */
 
 .audio-player-wrapper {
     margin-top: 4px;
-    width: 220px; /* Фиксированная ширина видимой части */
+    width: 220px;
     height: 34px;
-    background: #050505; 
+    background: #050505;
 
     /* Рамка */
     border: 1px solid var(--text-dim);
     border-left: 4px solid var(--text-green);
     border-radius: 2px;
 
-    /* ВАЖНО: display flex и hidden скрывают лишнее */
+    /* ВАЖНО: Жестко обрезаем всё лишнее */
     display: flex;
     align-items: center;
-    overflow: hidden; /* Обрезает все, что вылезает за пределы (троеточие) */
+    overflow: hidden; 
     
     position: relative;
     box-shadow: inset 0 0 5px rgba(0,0,0,0.8);
 }
 
-/* Декоративная сетка (оставляем, красиво) */
+/* Сетка-сканер */
 .audio-player-wrapper::after {
     content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
     background-image: linear-gradient(90deg, transparent 95%, rgba(26, 128, 26, 0.2) 5%);
@@ -453,40 +453,48 @@ textarea.terminal-textarea { height: 80px; resize: none; }
     pointer-events: none; z-index: 2;
 }
 
-/* Стандартный плеер (Взлом стилей) */
+/* Стандартный плеер (АГРЕССИВНЫЙ ВЗЛОМ) */
 audio {
-    /* 1. ХАК ДЛЯ УДАЛЕНИЯ ТРОЕТОЧИЯ */
-    /* Делаем плеер шире контейнера на 30px */
-    width: calc(100% + 30px); 
+    /* 1. УБИЙСТВО ТРОЕТОЧИЯ */
+    /* Делаем плеер значительно шире (+60px), чтобы меню ушло далеко за край */
+    width: calc(100% + 60px); 
     height: 100%;
     
-    /* Сдвигаем влево, чтобы обрезался именно правый край с кнопкой меню */
-    margin-right: -30px; 
+    /* Сдвигаем влево, чтобы обрезать правый хвост */
+    margin-right: -60px; 
+    /* Немного компенсируем центровку */
+    margin-left: -10px;
     
-    /* 2. ЦВЕТОВАЯ КОРРЕКЦИЯ (ЗЕЛЕНЫЙ) */
-    /* invert(1) -> Делает фон черным, иконки белыми.
-       sepia(1) -> Делает иконки коричневыми.
-       saturate(10) -> Делает цвет максимально насыщенным (ядерным).
-       hue-rotate(95deg) -> Сдвигает ядерный цвет в зеленый спектр.
+    /* 2. ЦВЕТОВАЯ КОРРЕКЦИЯ (ЧИСТЫЙ ЗЕЛЕНЫЙ) */
+    /* invert(100%) -> Белый становится черным, черный белым.
+       sepia(100%) -> Всё становится желто-коричневым.
+       saturate(500%) -> Выкручиваем насыщенность до предела (кислотный цвет).
+       hue-rotate(65deg) -> Поворачиваем желтый спектр ровно в ярко-зеленый.
+       (95deg давал бирюзу, 65-70deg дает зеленый)
     */
-    filter: invert(0.9) sepia(1) saturate(5) hue-rotate(95deg);
+    filter: invert(100%) sepia(100%) saturate(500%) hue-rotate(65deg);
     
     outline: none;
     position: relative;
     z-index: 1;
     display: block;
+    
+    /* Убираем фон самого элемента */
+    background: transparent;
 }
 
-/* Хак для Chrome/Edge: Убирает родной белый фон, чтобы работал наш фильтр */
+/* Хак для Chrome/Edge: Убирает родной белый фон контролов */
 audio::-webkit-media-controls-enclosure {
     background-color: transparent !important;
     border-radius: 0 !important;
 }
 
-/* Скрываем конкретно кнопку меню в Chrome (дополнительная страховка) */
+/* Двойная страховка для скрытия меню */
 audio::-webkit-media-controls-overflow-menu-button {
     display: none !important;
+    opacity: 0;
 }
 audio::-webkit-media-controls-panel {
     background-color: transparent !important;
+    width: calc(100% + 30px); /* Растягиваем панель */
 }
