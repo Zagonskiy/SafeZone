@@ -148,7 +148,22 @@ input:focus { border-color: var(--text-green); box-shadow: 0 0 15px rgba(51, 255
 .search-item:last-child { border-bottom: none; }
 
 /* МОДАЛКА */
-.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 2000; display: none; justify-content: center; align-items: center; backdrop-filter: blur(3px); }
+.modal-overlay { 
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    height: 100%; 
+    background: rgba(0,0,0,0.9); 
+    
+    /* ИЗМЕНЕНО: Ставим максимальный приоритет, выше чем у чата (5000) */
+    z-index: 10000; 
+    
+    display: none; 
+    justify-content: center; 
+    align-items: center; 
+    backdrop-filter: blur(3px); 
+}
 .modal-overlay.active { display: flex; }
 .modal-box { width: 90%; max-width: 400px; background: #111; border: 2px solid var(--alert-red); padding: 20px; text-align: center; }
 .modal-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px;}
