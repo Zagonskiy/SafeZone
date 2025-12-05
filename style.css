@@ -326,3 +326,47 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 .status-wait { color: #666; }       /* Часы */
 .status-sent { color: #888; }       /* Одна галочка */
 .status-read { color: var(--text-green); text-shadow: 0 0 5px var(--text-green); } /* Две галочки */
+
+/* ОКНО ПРОСМОТРА ФОТО */
+.modal-content-img {
+    margin: auto;
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 90%;
+    max-height: 80vh; /* Оставляем место для подписи */
+    border: 2px solid var(--text-green);
+    box-shadow: 0 0 50px rgba(51, 255, 51, 0.2);
+    animation: zoom 0.3s;
+}
+
+.caption-text {
+    margin: auto;
+    display: block;
+    width: 80%;
+    max-width: 700px;
+    text-align: center;
+    color: #ccc;
+    padding: 10px 0;
+    height: 150px;
+}
+
+/* Кнопка закрытия (Крестик) */
+.close-btn {
+    position: absolute;
+    top: 15px;
+    right: 35px;
+    color: #f1f1f1;
+    font-size: 40px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+    z-index: 30001;
+}
+.close-btn:hover { color: var(--alert-red); }
+
+/* Анимация увеличения */
+@keyframes zoom {
+    from {transform:scale(0)} 
+    to {transform:scale(1)}
+}
