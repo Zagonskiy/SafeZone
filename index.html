@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>SafeZone | Secure Terminal</title>
-    <link rel="stylesheet" href="style.css?v=1.1">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
@@ -19,7 +19,6 @@
                     <h1>SAFE<span class="highlight">ZONE</span></h1>
                     <p class="status">SYSTEM: ONLINE</p>
                 </div>
-
                 <form id="login-form">
                     <h2 class="military-title">/// ДОСТУП К ТЕРМИНАЛУ ///</h2>
                     <div class="input-group">
@@ -33,7 +32,6 @@
                     <button type="submit" class="btn-metal">ПОДТВЕРДИТЬ ЛИЧНОСТЬ</button>
                     <p class="switch-mode" id="to-register">>> ЗАПРОСИТЬ НОВЫЙ ДОПУСК</p>
                 </form>
-
                 <form id="register-form" style="display: none;">
                     <h2 class="military-title">/// ЗАПРОС ДОПУСКА ///</h2>
                     <div class="input-group">
@@ -55,7 +53,6 @@
                     <button type="submit" class="btn-metal danger">ОФОРМИТЬ ДОПУСК</button>
                     <p class="switch-mode" id="to-login"><< ВЕРНУТЬСЯ НА КПП</p>
                 </form>
-
                 <div id="error-log" class="console-output"></div>
             </div>
 
@@ -63,24 +60,24 @@
                 
                 <div id="hq-screen" class="screen-panel side-panel">
                     <header class="top-bar">
-                        <span id="user-display">БОЕЦ: UNKNOWN</span>
+                        <div id="my-profile-link" class="profile-link">
+                            <img id="my-mini-avatar" src="" class="avatar-mini" style="display:none">
+                            <span id="user-display">БОЕЦ: UNKNOWN</span>
+                        </div>
                         <button id="logout-btn" class="btn-small">ОТБОЙ</button>
                     </header>
                     
                     <div class="search-panel">
                         <div class="input-wrapper">
                             <input type="text" id="search-nick" placeholder="> ПОИСК ЦЕЛИ..." class="terminal-input" autocomplete="off">
-                            
                             <div id="search-indicator" class="typing-indicator"></div>
-
                             <div id="search-results" class="search-results-area" style="display: none;">
                                 <div id="search-list"></div>
                             </div>
                         </div>
                     </div>
-                    
+
                     <div id="chats-container" class="scroll-zone"></div>
-                    
                     <div id="empty-state" class="chat-list-empty" style="display: none;">
                         <div class="radar-scan"></div>
                         <p>> ЖДУ СИГНАЛА...</p>
@@ -89,14 +86,12 @@
 
                 <div id="chat-screen" class="screen-panel main-panel">
                     <header class="top-bar chat-header">
-                        <button id="back-btn" class="btn-small mobile-only">< НАЗАД</button>
+                        <button id="back-btn" class="btn-small mobile-only"><</button>
                         <span id="chat-title">КАНАЛ: НЕ ВЫБРАН</span>
                     </header>
                     
                     <div id="messages-area" class="messages-container">
-                        <div class="no-chat-selected">
-                            <p>> ВЫБЕРИТЕ ЦЕЛЬ ДЛЯ СВЯЗИ</p>
-                        </div>
+                        <div class="no-chat-selected"><p>> ВЫБЕРИТЕ ЦЕЛЬ ДЛЯ СВЯЗИ</p></div>
                     </div>
 
                     <form id="msg-form" class="msg-input-area" style="display: none;">
@@ -104,11 +99,39 @@
                         <button type="submit" class="btn-metal btn-send">></button>
                     </form>
                 </div>
-
-            </div> </div>
+            </div> 
+        </div>
     </div>
 
-    <div id="custom-modal" class="modal-overlay">
+    <div id="profile-modal" class="modal-overlay">
+        <div class="modal-box profile-box">
+            <div class="modal-title">/// ЛИЧНОЕ ДОСЬЕ ///</div>
+            
+            <div class="profile-avatar-container">
+                <img id="profile-img-preview" src="" class="profile-avatar-large">
+                <div id="avatar-placeholder" class="avatar-placeholder">НЕТ ФОТО</div>
+                <input type="file" id="avatar-upload" accept="image/*" style="display: none;">
+                <button id="btn-upload-avatar" class="btn-small" style="margin-top:5px;">ЗАГРУЗИТЬ ФОТО</button>
+            </div>
+
+            <div class="input-group">
+                <label>ПОЗЫВНОЙ</label>
+                <input type="text" id="profile-nick-input" disabled>
+            </div>
+            
+            <div class="input-group">
+                <label>ХАРАКТЕРИСТИКА (ОПИСАНИЕ)</label>
+                <textarea id="profile-desc-input" class="terminal-textarea" placeholder="Нет данных..." disabled></textarea>
+            </div>
+
+            <div class="modal-actions">
+                <button id="btn-close-profile" class="btn-small">ЗАКРЫТЬ</button>
+                <button id="btn-save-profile" class="btn-metal danger" style="display:none">СОХРАНИТЬ ДАННЫЕ</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="custom-modal" class="modal-overlay" style="z-index: 20000;">
         <div class="modal-box">
             <div class="modal-title">/// SYSTEM ALERT ///</div>
             <p id="modal-msg" class="modal-text">MESSAGE TEXT</p>
