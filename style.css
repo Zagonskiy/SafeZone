@@ -541,3 +541,26 @@ audio::-webkit-media-controls-panel {
     background-color: transparent !important;
     width: calc(100% + 30px); /* Растягиваем панель */
 }
+/* Кнопка удаления в списке чатов */
+.btn-trash {
+    margin-left: auto; /* Прижимает кнопку вправо */
+    background: transparent;
+    border: 1px solid var(--alert-red);
+    color: var(--alert-red);
+    width: 30px;
+    height: 30px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    transition: 0.2s;
+    z-index: 5; /* Чтобы клик не открывал чат */
+}
+
+.btn-trash:hover {
+    background: var(--alert-red);
+    color: #000;
+}
+
