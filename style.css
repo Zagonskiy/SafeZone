@@ -311,3 +311,18 @@ textarea.terminal-textarea { height: 80px; resize: none; }
     object-fit: contain;
     border: 1px solid #333;
 }
+
+/* СТАТУС СООБЩЕНИЯ */
+.msg-status {
+    font-size: 0.7rem;
+    margin-left: 5px;
+    font-weight: bold;
+    display: inline-block;
+    width: 20px; /* Фикс ширины, чтобы время не прыгало */
+    text-align: right;
+}
+
+/* Цвета статусов */
+.status-wait { color: #666; }       /* Часы */
+.status-sent { color: #888; }       /* Одна галочка */
+.status-read { color: var(--text-green); text-shadow: 0 0 5px var(--text-green); } /* Две галочки */
