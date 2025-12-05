@@ -111,18 +111,34 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 .top-bar { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--text-dim); padding-bottom: 10px; margin-bottom: 10px; min-height: 30px;}
 
 /* ОБЛАСТЬ СООБЩЕНИЙ - ТУТ БУДЕТ СКРОЛЛ */
-/* ОБЛАСТЬ СООБЩЕНИЙ */
+/* ОБЛАСТЬ СООБЩЕНИЙ - ВОЗВРАЩЕНИЕ СКРОЛЛА */
 .messages-container { 
-    flex: 1; /* Растягивается */
+    /* flex-grow: 1 заставляет занимать все доступное место */
+    flex: 1 1 auto;
+    
+    /* КРИТИЧЕСКИ ВАЖНО: */
+    /* Заставляем контейнер не вылезать за пределы flex-родителя */
+    min-height: 0; 
+    height: 0; 
+    
+    /* Включаем прокрутку */
     overflow-y: auto; 
     overflow-x: hidden;
-    min-height: 0; 
+    
     padding: 10px; 
+    /* Добавляем отступ снизу, чтобы текст не прилипал к полю ввода */
+    padding-bottom: 20px; 
+    
     background: rgba(0,0,0,0.2); 
     display: flex; 
     flex-direction: column; 
     gap: 8px; 
-    padding-bottom: 20px; /* Отступ снизу, чтобы текст не прилипал к вводу */
+    
+    /* Для плавной прокрутки при отправке */
+    scroll-behavior: smooth;
+    
+    /* Для телефонов (инерционная прокрутка) */
+    -webkit-overflow-scrolling: touch;
 }
 .no-chat-selected { height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.5; }
 
@@ -206,19 +222,25 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 .device-case { width: 100%; height: 100%; border-radius: 0; border: none; padding: 0; }
 .screw { display: none; }
 .side-panel { width: 100%; height: 100%; }
-/* ПРАВАЯ ПАНЕЛЬ (ЧАТ) - ИСПРАВЛЕНО ДЛЯ МОБИЛЬНЫХ */
+/* ПРАВАЯ ПАНЕЛЬ (ЧАТ) */
 .main-panel { 
-    width: 100%; 
-    /* Используем фиксированное позиционирование для мобильных, чтобы клавиатура не ломала верстку */
-    height: 100vh; /* Viewport Height */
-    height: 100dvh; /* Dynamic Viewport Height (для Safari iOS) */
+    /* Фиксируем панель жестко по 4 углам экрана */
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    right: 0; 
+    bottom: 0;
     
-    position: fixed; /* Фиксируем на экране */
-    top: 0; left: 0; 
+    width: 100%; 
+    height: 100%; 
+    
     background: var(--screen-bg); 
     
     display: flex;
     flex-direction: column; 
+    
+    /* Скрываем скролл самой панели, чтобы не скроллилась шапка */
+    overflow: hidden; 
     
     transform: translateX(100%); 
     transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1); 
