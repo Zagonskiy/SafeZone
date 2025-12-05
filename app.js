@@ -459,22 +459,45 @@ function loadMyChats() {
     });
 }
 
-// Сообщения
-function openChat(chatId, chatName) {
+// --- ОТКРЫТИЕ ЧАТА (ИСПРАВЛЕНО) ---
+async function openChat(chatId, chatName) {
     currentChatId = chatId;
+    currentChatPartnerAvatar = null; // Сбрасываем старое фото
+    
     document.getElementById('chat-title').innerText = `КАНАЛ: ${chatName}`;
     document.getElementById('msg-form').style.display = 'flex'; 
     document.getElementById('messages-area').innerHTML = ''; 
+    
     chatPanel.classList.add('open');
     if(searchInput) searchInput.blur(); 
+
+    // 1. Сначала узнаем ID собеседника и качаем его актуальную аватарку
+    try {
+        const chatSnap = await getDoc(doc(db, "chats", chatId));
+        if (chatSnap.exists()) {
+            const participants = chatSnap.data().participants;
+            // Находим ID того, кто НЕ я
+            const partnerUid = participants.find(uid => uid !== auth.currentUser.uid);
+            
+            if (partnerUid) {
+                const userSnap = await getDoc(doc(db, "users", partnerUid));
+                if (userSnap.exists() && userSnap.data().avatarBase64) {
+                    currentChatPartnerAvatar = userSnap.data().avatarBase64;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Ошибка загрузки профиля собеседника", e);
+    }
+
+    // 2. Теперь запускаем прослушку сообщений
     if (unsubscribeMessages) unsubscribeMessages();
+    
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "asc"));
+    
     unsubscribeMessages = onSnapshot(q, (snap) => {
         const area = document.getElementById('messages-area');
         area.innerHTML = '';
-        // ВАЖНО: Мы получаем всех пользователей чата, чтобы найти их аватарки
-        // Для простоты, пока рендерим без аватарок (или аватарки надо хранить в самом сообщении)
-        // Чтобы сделать красиво, сохраним аватар в сообщении при отправке.
         snap.forEach(renderMessage);
         area.scrollTop = area.scrollHeight;
     });
@@ -498,72 +521,92 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
     input.value = '';
 });
 
+// --- РЕНДЕР СООБЩЕНИЯ (ИСПРАВЛЕНО) ---
 function renderMessage(docSnap) {
     const msg = docSnap.data();
     const isMine = msg.senderId === auth.currentUser.uid;
     
-    // Контейнер строки (чтобы аватар был рядом)
+    // Контейнер строки
     const row = document.createElement('div');
     row.className = `msg-row ${isMine ? 'my' : 'other'}`;
 
-    // Аватарка (только если чужое сообщение)
+    // АВАТАРКА (Только для чужих сообщений)
     if (!isMine) {
         const avatar = document.createElement('img');
         avatar.className = 'chat-avatar';
-        // Если есть аватарка в сообщении - ставим, если нет - заглушка
-        if (msg.senderAvatar) {
+        
+        // Логика выбора фото:
+        // 1. Если мы скачали актуальное фото при входе в чат -> ставим его
+        // 2. Если нет, но оно сохранено в сообщении -> ставим его
+        // 3. Иначе -> ставим заглушку
+        
+        if (currentChatPartnerAvatar) {
+            avatar.src = currentChatPartnerAvatar;
+        } else if (msg.senderAvatar) {
             avatar.src = msg.senderAvatar;
         } else {
-            // Генерируем цветной кружок или пустую картинку
-            avatar.style.background = '#333';
+            // Пустой серый круг
+            avatar.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; 
+            avatar.style.backgroundColor = '#333';
         }
-        // Клик по аватарке -> Профиль
+        
+        // Клик -> Открыть профиль
         avatar.onclick = () => openProfile(msg.senderId, false);
         row.appendChild(avatar);
     }
 
+    // Блок сообщения
     const div = document.createElement('div');
     div.className = `msg ${isMine ? 'my' : 'other'}`;
     
+    // Имя над сообщением (для чужих)
+    if (!isMine) {
+        const nickSpan = document.createElement('div');
+        nickSpan.innerText = msg.senderNick;
+        nickSpan.style.fontSize = '0.7rem'; 
+        nickSpan.style.marginBottom = '2px';
+        nickSpan.style.color = '#888'; 
+        nickSpan.style.cursor = 'pointer';
+        nickSpan.onclick = () => openProfile(msg.senderId, false);
+        div.appendChild(nickSpan);
+    }
+
     const textDiv = document.createElement('div');
     textDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
     
-    // Клик по НИКУ -> Профиль (добавим имя над сообщением если это не я)
-    if (!isMine) {
-        const nickSpan = document.createElement('div');
-        nickSpan.style.fontSize = '0.7rem';
-        nickSpan.style.marginBottom = '2px';
-        nickSpan.style.color = '#fff';
-        nickSpan.style.cursor = 'pointer';
-        nickSpan.style.textDecoration = 'underline';
-        nickSpan.innerText = msg.senderNick;
-        nickSpan.onclick = () => openProfile(msg.senderId, false);
-        div.prepend(nickSpan);
-    }
-
     const metaDiv = document.createElement('div');
     metaDiv.className = 'msg-meta';
     
+    // Кнопки управления (только для своих)
     if (isMine) {
         const editBtn = document.createElement('span');
-        editBtn.innerText = '[E]'; editBtn.style.cursor = 'pointer'; editBtn.style.marginRight = '8px';
+        editBtn.innerText = '[E]'; 
+        editBtn.style.cursor = 'pointer'; 
+        editBtn.style.marginRight = '8px';
         editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
+
         const delBtn = document.createElement('span');
-        delBtn.innerText = '[X]'; delBtn.style.cursor = 'pointer'; delBtn.style.marginRight = '8px';
+        delBtn.innerText = '[X]'; 
+        delBtn.style.cursor = 'pointer'; 
+        delBtn.style.marginRight = '8px';
         delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id);
-        metaDiv.appendChild(editBtn); metaDiv.appendChild(delBtn);
+
+        metaDiv.appendChild(editBtn);
+        metaDiv.appendChild(delBtn);
     }
 
     const timeSpan = document.createElement('span');
     const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
     timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+    
     metaDiv.appendChild(timeSpan);
-    div.appendChild(textDiv); div.appendChild(metaDiv);
+    div.appendChild(textDiv);
+    div.appendChild(metaDiv);
+    
     row.appendChild(div);
     
     document.getElementById('messages-area').appendChild(row);
 }
-
 // Глобальные функции
 window.deleteMsg = async (cId, mId) => { if (await showModal('УДАЛИТЬ?', 'confirm')) await deleteDoc(doc(db, "chats", cId, "messages", mId)); };
 window.editMsg = async (cId, mId, old) => {
