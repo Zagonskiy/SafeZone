@@ -1244,7 +1244,7 @@ function initPeer(uid) {
         });
     }
 });
-
+}
 
 // 2. Слушаем Firestore на предмет входящих вызовов
 function listenForIncomingCalls(myUid) {
