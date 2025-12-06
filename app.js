@@ -1271,7 +1271,7 @@ async function startVoiceCall(receiverId) {
         return;
     }
 
-    showActiveCallScreen(currentUserData.nickname, "СОЕДИНЕНИЕ..."); 
+    showActiveCallScreen(currentUserData.nickname, "ПОИСК АБОНЕНТА..."); 
     
     getDoc(doc(db, "users", receiverId)).then(s => {
         if(s.exists()) document.getElementById('call-partner-name').innerText = s.data().nickname;
@@ -1289,98 +1289,106 @@ async function startVoiceCall(receiverId) {
     
     activeCallDocId = callDocRef.id;
 
-    onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
+    const unsub = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
         if (!snap.exists()) return;
         const data = snap.data();
         
+        // --- СЦЕНАРИЙ: АБОНЕНТ НАЖАЛ "ОТВЕТИТЬ" ---
         if (data.status === "answered") {
-            if (currentCall) return;
+            if (currentCall) return; // Уже звоним
 
             document.getElementById('call-status-text').innerText = "УСТАНОВКА СВЯЗИ...";
-            console.log("⚡ Получен ответ. Ждем стабилизации сети собеседника...");
+            console.log("⚡ Получен ответ. Начинаем дозвон...");
 
-            let connectAttempts = 0;
-            const maxAttempts = 8; 
-            
-            const attemptConnection = () => {
-                connectAttempts++;
-                console.log(`📡 Попытка дозвона #${connectAttempts} -> ${receiverId}`);
-                document.getElementById('call-status-text').innerText = `ПОДКЛЮЧЕНИЕ (${connectAttempts})...`;
+            let attempt = 0;
+            const maxAttempts = 10;
+            let retryTimer = null;
 
-                // ВАЖНО: Если мы сами отвалились, реконнектимся перед звонком
-                if (peer.disconnected) peer.reconnect();
+            // Обработчик ошибки "Абонент не в сети"
+            const unavailableHandler = (err) => {
+                if (err.type === 'peer-unavailable') {
+                    console.warn(`♻️ Абонент не в сети PeerJS (Попытка ${attempt}/${maxAttempts}). Ждем...`);
+                    // Не ретраим мгновенно! Ждем 2 секунды.
+                    // Если попытки кончились - выходим.
+                    if (attempt >= maxAttempts) {
+                        alert("Не удалось соединиться. Абонент оффлайн.");
+                        endCallLocal(); 
+                    }
+                }
+            };
+            peer.on('error', unavailableHandler);
 
-                const call = peer.call(receiverId, localStream);
-
-                if (!call) {
-                    console.warn("⚠️ Сбой вызова (call object null).");
-                    if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 2000);
+            // Функция дозвона
+            const tryCall = () => {
+                attempt++;
+                if (attempt > maxAttempts) {
+                    alert("Сбой соединения (Тайм-аут)");
+                    endCallLocal();
                     return;
                 }
 
-                const connectionTimeout = setTimeout(() => {
-                    console.warn("⏰ Тайм-аут попытки. Перезапуск...");
-                    if (currentCall) currentCall.close();
-                    if (connectAttempts < maxAttempts) attemptConnection();
-                }, 4000); 
+                document.getElementById('call-status-text').innerText = `ПОДКЛЮЧЕНИЕ (${attempt})...`;
+                console.log(`📡 Попытка call #${attempt} -> ${receiverId}`);
 
-                call.on('stream', (remoteStream) => {
-                    clearTimeout(connectionTimeout); 
-                    console.log("✅ P2P Установлено!");
-                    setupRemoteAudio(remoteStream);
-                    startCallTimer();
-                });
+                // Самый важный момент: PeerJS иногда кэширует ошибки.
+                // Мы просто вызываем call. Если ID нет, сработает глобальный peer.on('error')
+                const call = peer.call(receiverId, localStream);
 
-                call.on('close', () => endCallLocal());
-                
-                call.on('error', (err) => {
-                    console.error("Call Error:", err);
-                    clearTimeout(connectionTimeout);
-                    if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 2000);
-                });
+                // Если вызов создался, вешаем слушатели
+                if (call) {
+                    call.on('stream', (remoteStream) => {
+                        console.log("✅ P2P СОЕДИНЕНИЕ УСТАНОВЛЕНО!");
+                        // Очищаем таймеры ретрая
+                        if (retryTimer) clearTimeout(retryTimer);
+                        peer.off('error', unavailableHandler); 
+                        
+                        setupRemoteAudio(remoteStream);
+                        startCallTimer();
+                    });
 
-                currentCall = call;
-            };
-
-            // Первая попытка через 2 секунды (даем телефону время на reconnect)
-            setTimeout(attemptConnection, 2000);
-
-            // Глобальный слушатель "peer-unavailable" для этого сеанса
-            const retryHandler = (err) => {
-                // Если пир недоступен, значит он переподключается. Просто ждем следующей попытки attemptConnection
-                if (err.type === 'peer-unavailable') {
-                    console.log(`♻️ Абонент не в сети PeerJS. (Попытка ${connectAttempts}/${maxAttempts})`);
+                    call.on('close', () => endCallLocal());
+                    call.on('error', (e) => console.error("Call Error:", e));
+                    
+                    currentCall = call;
                 }
+
+                // Если соединения нет через 2.5 секунды — пробуем снова
+                // Это покроет и случай peer-unavailable, и просто плохую сеть
+                retryTimer = setTimeout(() => {
+                    console.log("⏰ Нет ответа от PeerJS, пробуем снова...");
+                    if (currentCall) currentCall.close();
+                    tryCall();
+                }, 2500);
             };
-            peer.on('error', retryHandler);
-            
+
+            // Первая попытка с задержкой (даем телефону время)
+            setTimeout(tryCall, 1000);
+
+            // Переопределяем очистку
             window.endCallLocal = () => {
-                peer.off('error', retryHandler);
+                if (retryTimer) clearTimeout(retryTimer);
+                peer.off('error', unavailableHandler);
+                // Стандартная очистка...
                 document.getElementById('active-call-screen').classList.remove('active');
                 document.getElementById('incoming-call-modal').classList.remove('active');
                 if (currentCall) { currentCall.close(); currentCall = null; }
                 if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-                const remoteAudio = document.getElementById('remote-audio');
-                if (remoteAudio) remoteAudio.srcObject = null;
+                const el = document.getElementById('remote-audio');
+                if(el) el.srcObject = null;
                 stopCallTimer();
                 activeCallDocId = null;
-                incomingCallData = null;
-                isMicMuted = false;
-                updateMicIcon();
+                unsub(); // Отписка от базы
             };
         } 
         else if (data.status === "rejected") {
-            document.getElementById('call-status-text').innerText = "ОТКЛОНЕНО";
             logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
-            setTimeout(endCallLocal, 1500);
+            endCallLocal();
         }
         else if (data.status === "ended") {
-             document.getElementById('call-status-text').innerText = "ЗАВЕРШЕН";
-             setTimeout(endCallLocal, 1000);
+             endCallLocal();
         }
     });
-}            
-
+}
 // 5. Ответ на звонок (ИСПРАВЛЕННАЯ ВЕРСИЯ С ОЖИДАНИЕМ)
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
     document.getElementById('incoming-call-modal').classList.remove('active');
@@ -1599,68 +1607,54 @@ document.body.addEventListener('touchstart', function() {
     }
 }, { once: true });
 
-// Вспомогательная функция: Гарантирует живое соединение (С ЗАЩИТОЙ ОТ DESTROYED)
+// Вспомогательная функция: Гарантирует живое соединение (HARD RESET)
 function ensurePeerConnected() {
     return new Promise((resolve, reject) => {
-        // Сценарий 1: Пира нет или он уничтожен — создаем заново
-        if (!peer || peer.destroyed) {
-            console.log("⚠️ Peer уничтожен или отсутствует. Пересоздаю...");
-            
-            // Если старый объект есть, но уничтожен - обнуляем
-            peer = null; 
-            
-            // Запускаем инициализацию заново
-            initPeer(auth.currentUser.uid); 
-            
-            // Ждем, пока новый peer не получит ID и не соединится
-            let attempts = 0;
-            const checkInterval = setInterval(() => {
-                attempts++;
-                // Успех: пир существует, не уничтожен, не отключен и имеет ID
-                if (peer && !peer.destroyed && !peer.disconnected && peer.id) {
-                    clearInterval(checkInterval);
-                    console.log("✅ Новый Peer готов к работе!");
-                    resolve();
-                }
-                // Тайм-аут через 4 секунды
-                if (attempts > 20) {
-                    clearInterval(checkInterval);
-                    reject("Не удалось пересоздать Peer (TimeOut)");
-                }
-            }, 200);
-            return;
-        }
+        console.log("🛠️ Проверка состояния PeerJS...");
 
-        // Сценарий 2: Пир жив и подключен — всё ок
-        if (!peer.disconnected) {
-            resolve();
-            return;
-        }
-
-        // Сценарий 3: Пир жив, но отключен от сокета (спящий режим) — реконнектим
-        console.log("🔌 PeerJS отключен. Пробую reconnect()...");
-        peer.reconnect();
-
-        const onOpen = () => {
-            peer.off('open', onOpen);
-            console.log("✅ Reconnect успешен!");
-            resolve();
+        // Функция проверки успеха
+        const waitForOpen = () => {
+            return new Promise((res, rej) => {
+                let attempts = 0;
+                const check = setInterval(() => {
+                    attempts++;
+                    // Если пир жив, не отключен и имеет ID
+                    if (peer && !peer.destroyed && !peer.disconnected && peer.id) {
+                        clearInterval(check);
+                        console.log("✅ PeerJS готов к работе! ID:", peer.id);
+                        res();
+                    }
+                    if (attempts > 30) { // 6 секунд максимум
+                        clearInterval(check);
+                        rej("PeerJS не смог соединиться с сервером");
+                    }
+                }, 200);
+            });
         };
-        
-        peer.on('open', onOpen);
 
-        // Страховка от зависания реконнекта
-        setTimeout(() => {
-            if (peer && !peer.disconnected) {
-                peer.off('open', onOpen);
-                resolve();
-            } else {
-                console.log("❌ Reconnect не удался. Принудительное пересоздание.");
-                // Если реконнект не прошел, уничтожаем и рекурсивно вызываем эту же функцию
-                // чтобы она пошла по Сценарию 1
-                if(peer) peer.destroy();
-                ensurePeerConnected().then(resolve).catch(reject);
-            }
-        }, 2000);
+        // Если пир выглядит живым - проверим пинг (легкий путь)
+        if (peer && !peer.destroyed && !peer.disconnected) {
+            resolve();
+            return;
+        }
+
+        // ТЯЖЕЛЫЙ ПУТЬ: Уничтожаем и создаем заново
+        console.warn("⚠️ PeerJS неактивен. Выполняю ПОЛНЫЙ ПЕРЕЗАПУСК...");
+        
+        if (peer) peer.destroy();
+        peer = null;
+
+        // Запускаем инициализацию (она создаст new Peer)
+        initPeer(auth.currentUser.uid);
+
+        // Ждем пока он поднимется
+        waitForOpen()
+            .then(resolve)
+            .catch(err => {
+                console.error(err);
+                // Последний шанс: еще раз
+                initPeer(auth.currentUser.uid);
+                setTimeout(resolve, 2000); // Просто ждем и надеемся
+            });
     });
 }
