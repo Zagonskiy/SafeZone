@@ -366,48 +366,107 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 .status-sent { color: #888; }       
 .status-read { color: var(--text-green); text-shadow: 0 0 5px var(--text-green); }
 
-/* ОКНО ПРОСМОТРА ФОТО */
-.modal-content-img {
-    margin: auto;
-    display: block;
-    width: auto;
-    height: auto;
-    max-width: 90%;
-    max-height: 80vh; /* Оставляем место для подписи */
-    border: 2px solid var(--text-green);
-    box-shadow: 0 0 50px rgba(51, 255, 51, 0.2);
-    animation: zoom 0.3s;
+/* --- ПРОСМОТРЩИК (LIGHTBOX) - АДАПТИВНЫЙ --- */
+
+#image-viewer-modal {
+    /* Flexbox для идеального центрирования */
+    display: none; /* Скрыт по умолчанию */
+    flex-direction: column; /* Вертикальный стек: Видео сверху, Текст снизу */
+    justify-content: center; /* Центр по вертикали */
+    align-items: center; /* Центр по горизонтали */
+    
+    background: rgba(0, 0, 0, 0.95);
+    z-index: 30000;
+    
+    /* Отступы, чтобы контент не прилипал к краям телефона */
+    padding: 20px; 
+    box-sizing: border-box; 
 }
 
+/* Активное состояние (добавляем !important для перекрытия display: none) */
+#image-viewer-modal.active {
+    display: flex !important; 
+}
+
+/* Общие стили для картинки и видео в просмотре */
+.modal-content-img, #full-video-view {
+    /* Максимальные размеры */
+    max-width: 100%;
+    max-height: 70vh; /* Занимаем не более 70% высоты экрана, оставляя место для текста */
+    
+    width: auto; /* Сохраняем пропорции */
+    height: auto;
+    
+    border: 2px solid var(--text-green);
+    box-shadow: 0 0 30px rgba(51, 255, 51, 0.15);
+    background: #000;
+    
+    /* Анимация появления */
+    animation: zoom 0.3s ease-out;
+    
+    /* Убираем фильтры для чистого цвета */
+    filter: none;
+    outline: none;
+    
+    /* Порядок: Видео первое */
+    order: 1;
+}
+
+/* Текст подписи */
 .caption-text {
-    margin: auto;
-    display: block;
-    width: 80%;
+    /* Порядок: Текст второй */
+    order: 2;
+    
+    margin-top: 15px;
+    width: 100%;
     max-width: 700px;
     text-align: center;
     color: #ccc;
-    padding: 10px 0;
-    height: 150px;
+    font-size: 1rem;
+    
+    /* Если текста много - скроллим сам текст, а не весь экран */
+    max-height: 20vh; 
+    overflow-y: auto;
+    
+    /* Перенос длинных слов */
+    word-wrap: break-word;
 }
 
-/* Кнопка закрытия (Крестик) */
+/* Кнопка закрытия */
 .close-btn {
     position: absolute;
-    top: 15px;
-    right: 35px;
-    color: #f1f1f1;
-    font-size: 40px;
+    top: 20px;
+    right: 20px;
+    color: #fff;
+    font-size: 2.5rem;
     font-weight: bold;
     cursor: pointer;
-    transition: 0.3s;
     z-index: 30001;
+    line-height: 1;
+    opacity: 0.7;
+    transition: 0.2s;
 }
-.close-btn:hover { color: var(--alert-red); }
+.close-btn:hover {
+    color: var(--alert-red);
+    opacity: 1;
+}
 
-/* Анимация увеличения */
+/* Анимация */
 @keyframes zoom {
-    from {transform:scale(0)} 
-    to {transform:scale(1)}
+    from { transform: scale(0.9); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+/* АДАПТИВНОСТЬ ДЛЯ ТЕЛЕФОНОВ */
+@media (max-width: 768px) {
+    .modal-content-img, #full-video-view {
+        width: 100%; /* На телефоне растягиваем по ширине */
+        max-height: 60vh; /* Чуть меньше высоты, чтобы клавиатура/интерфейс не мешали */
+    }
+    
+    .caption-text {
+        font-size: 0.9rem; /* Текст чуть меньше */
+    }
 }
 
 /* --- ГОЛОСОВЫЕ СООБЩЕНИЯ --- */
