@@ -34,11 +34,12 @@ let currentChatPartnerAvatar = null;
 // Переменные для записи
 let mediaRecorder = null;
 let audioChunks = [];
+let recStartTimePress = 0;
+let isRecording = false;
+let isLockedMode = false;
+let detectedMimeType = '';
 
-let profileToEdit = null; 
-let currentChatPartnerAvatar = null;
-
-//Дефолт ава
+// Дефолт аватар (Солдатик)
 const DEFAULT_AVATAR = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2333ff33' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='100%25' height='100%25' fill='%23111'/%3E%3Cpath d='M12 2C9 2 7 3.5 7 6v1c0 .5-.5 1-1 1s-1 .5-1 1v2c0 1.5 1 2.5 3 3'/%3E%3Cpath d='M12 2c3 0 5 1.5 5 4v1c0 .5.5 1 1 1s1 .5 1 1v2c0 1.5-1 2.5-3 3'/%3E%3Cpath d='M16 11c0 2.5-1.5 4-4 4s-4-1.5-4-4'/%3E%3Cpath d='M4 22v-2c0-2.5 2-4 4-5'/%3E%3Cpath d='M20 22v-2c0-2.5-2-4-4-5'/%3E%3Cpath d='M8 4h8'/%3E%3C/svg%3E";
 
 // --- DOM ЭЛЕМЕНТЫ ---
@@ -50,9 +51,9 @@ const myMiniAvatar = document.getElementById('my-mini-avatar');
 
 // Чат элементы
 const msgInput = document.getElementById('msg-input');
-const btnSendText = document.getElementById('btn-send-text'); // Кнопка отправки текста
-const btnMicRec = document.getElementById('btn-mic-rec');     // Кнопка микрофона
-const recordingOverlay = document.getElementById('recording-overlay'); // Оверлей записи
+const btnSendText = document.getElementById('btn-send-text'); 
+const btnMicRec = document.getElementById('btn-mic-rec');     
+const recordingOverlay = document.getElementById('recording-overlay'); 
 const chatImgUpload = document.getElementById('chat-img-upload');
 const btnAttachImg = document.getElementById('btn-attach-img');
 
@@ -86,6 +87,10 @@ const modalInput = document.getElementById('modal-input-field');
 const modalBtnConfirm = document.getElementById('modal-btn-confirm');
 const modalBtnCancel = document.getElementById('modal-btn-cancel');
 
+// Удаление чата
+const deleteChatModal = document.getElementById('delete-chat-modal');
+let chatToDeleteId = null;
+
 function showModal(text, type = 'alert', placeholder = '') {
     return new Promise((resolve) => {
         modalMsg.innerText = text;
@@ -110,7 +115,6 @@ function showModal(text, type = 'alert', placeholder = '') {
 // ==========================================
 // === ЛОГИКА ПЕРЕКЛЮЧЕНИЯ КНОПОК ===
 // ==========================================
-// Если вводим текст -> Показываем стрелочку, скрываем микрофон
 if (msgInput) {
     msgInput.addEventListener('input', () => {
         const text = msgInput.value.trim();
@@ -125,22 +129,14 @@ if (msgInput) {
 }
 
 // ==========================================
-// === ЛОГИКА ЗАПИСИ (ИСПРАВЛЕННАЯ v2.0) ===
+// === ЛОГИКА ЗАПИСИ (ГИБРИДНАЯ СИСТЕМА) ===
 // ==========================================
 
-let recStartTimePress = 0; // Время начала нажатия
-let isRecording = false;   // Флаг: идет ли запись
-let isLockedMode = false;  // Флаг: режим "замок" (запись по клику)
-let detectedMimeType = ''; // Сюда сохраним формат аудио (webm/mp4)
-
-// 1. НАЧАЛО ЗАПИСИ
 const startRecording = async (e) => {
-    // На телефоне предотвращаем выделение и скролл при касании кнопки
-    if (e.type === 'touchstart') e.preventDefault();
+    if(e.type === 'touchstart') e.preventDefault();
     
-    // Если уже пишем...
     if (isRecording) {
-        // ...и это был режим "замка" (клик), а теперь нажали второй раз -> останавливаем
+        // Если это второй клик в режиме "замка" - останавливаем
         if (isLockedMode) {
             stopAndSend();
         }
@@ -158,7 +154,7 @@ const startRecording = async (e) => {
         
         mediaRecorder = new MediaRecorder(stream);
         
-        // ВАЖНО: Запоминаем формат, который выбрал браузер (audio/webm или audio/mp4)
+        // ВАЖНО: Запоминаем формат, который выбрал браузер
         detectedMimeType = mediaRecorder.mimeType; 
         audioChunks = [];
 
@@ -166,17 +162,13 @@ const startRecording = async (e) => {
             if (event.data.size > 0) audioChunks.push(event.data);
         };
 
-        // НАСТРОЙКА ОСТАНОВКИ (сработает, когда вызовем .stop())
+        // НАСТРОЙКА ОСТАНОВКИ
         mediaRecorder.onstop = async () => {
-            // Гасим лампочку микрофона
             mediaRecorder.stream.getTracks().forEach(track => track.stop());
             
-            // ВАЖНО: Создаем Blob с ТЕМ ЖЕ типом, что и рекордер. Это чинит "0 секунд".
-            // Если тип пустой (бывает в Safari), пробуем mp4, иначе webm
             const finalType = detectedMimeType || 'audio/mp4'; 
             const audioBlob = new Blob(audioChunks, { type: finalType });
             
-            // Защита от случайных нажатий (слишком короткие не шлем)
             if (audioBlob.size < 1000) return; 
 
             const reader = new FileReader();
@@ -205,12 +197,10 @@ const startRecording = async (e) => {
             };
         };
 
-        // Старт (записываем кусочки каждые 100мс для надежности)
         mediaRecorder.start(100); 
         isRecording = true;
-        isLockedMode = false; // Пока не знаем, замок это или удержание
+        isLockedMode = false;
         
-        // Показываем оверлей
         if(recordingOverlay) {
             recordingOverlay.style.display = 'flex';
             document.getElementById('rec-status-text').innerText = "ЗАПИСЬ...";
@@ -218,38 +208,30 @@ const startRecording = async (e) => {
         
     } catch (err) {
         console.error("Mic Error:", err);
-        showModal("ОШИБКА ДОСТУПА К МИКРОФОНУ", "alert");
     }
 };
 
-// 2. ОБРАБОТКА ОТПУСКАНИЯ КНОПКИ
 const handleRelease = (e) => {
     if (e.type === 'touchend') e.preventDefault();
     
-    if (!isRecording) return; // Если запись не идет, игнорируем
+    if (!isRecording) return;
 
     const pressDuration = Date.now() - recStartTimePress;
 
-    // ЛОГИКА ГИБРИДНОГО РЕЖИМА:
-    
-    // А. Если нажатие было коротким (< 500мс) -> ВКЛЮЧАЕМ РЕЖИМ "ЗАМОК"
-    // Запись НЕ останавливается. Нужно нажать еще раз.
+    // Короткое нажатие (< 500мс) -> РЕЖИМ ЗАМКА (не останавливаем)
     if (pressDuration < 500 && !isLockedMode) {
         isLockedMode = true;
         document.getElementById('rec-status-text').innerText = "НАЖМИТЕ ДЛЯ ОТПРАВКИ";
-        // Меняем цвет кнопки или иконку визуально, чтобы было понятно
         if(btnMicRec) btnMicRec.style.border = "1px solid red"; 
         return;
     }
 
-    // Б. Если нажатие было долгим (> 500мс) -> ЭТО PUSH-TO-TALK
-    // Останавливаем и отправляем сразу.
+    // Долгое нажатие -> PUSH-TO-TALK (останавливаем)
     if (!isLockedMode) {
         stopAndSend();
     }
 };
 
-// 3. ФУНКЦИЯ ОСТАНОВКИ
 const stopAndSend = () => {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
@@ -257,23 +239,15 @@ const stopAndSend = () => {
     isRecording = false;
     isLockedMode = false;
     
-    // Сброс UI
     if(recordingOverlay) recordingOverlay.style.display = 'none';
-    if(btnMicRec) btnMicRec.style.border = ""; // Возвращаем рамку
+    if(btnMicRec) btnMicRec.style.border = "";
 };
 
-
-// 4. ПРИВЯЗКА СОБЫТИЙ
 if (btnMicRec) {
-    // Начало (Клик мышкой или Пальцем)
     btnMicRec.addEventListener('mousedown', startRecording);
     btnMicRec.addEventListener('touchstart', startRecording);
-
-    // Конец (Отпускание мыши или пальца)
     btnMicRec.addEventListener('mouseup', handleRelease);
     btnMicRec.addEventListener('touchend', handleRelease);
-    
-    // Если увел мышку с кнопки во время удержания -> Отправляем
     btnMicRec.addEventListener('mouseleave', (e) => {
         if (isRecording && !isLockedMode) {
             stopAndSend();
@@ -282,7 +256,7 @@ if (btnMicRec) {
 }
 
 // ==========================================
-// === СИСТЕМА СЖАТИЯ ИЗОБРАЖЕНИЙ ===
+// === СЖАТИЕ ФОТО ===
 // ==========================================
 function compressImage(file) {
     return new Promise((resolve, reject) => {
@@ -294,11 +268,9 @@ function compressImage(file) {
             img.onload = () => {
                 const canvas = document.createElement('canvas');
                 const MAX_WIDTH = 300;
-                const MAX_HEIGHT = 300;
-                let width = img.width;
-                let height = img.height;
+                let width = img.width; let height = img.height;
                 if (width > height) { if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; } } 
-                else { if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; } }
+                else { if (height > MAX_WIDTH) { width *= MAX_WIDTH / height; height = MAX_WIDTH; } }
                 canvas.width = width; canvas.height = height;
                 const ctx = canvas.getContext("2d");
                 ctx.drawImage(img, 0, 0, width, height);
@@ -333,7 +305,7 @@ function compressChatImage(file) {
 }
 
 // ==========================================
-// === ПРОФИЛЬ И ПОИСК ===
+// === ПРОФИЛЬ ===
 // ==========================================
 document.getElementById('my-profile-link').addEventListener('click', () => {
     if(currentUserData) openProfile(currentUserData.uid, true);
@@ -368,9 +340,9 @@ async function openProfile(uid, isMyProfile) {
         profileImgPreview.style.display = 'block';
         avatarPlaceholder.style.display = 'none';
     } else {
-        profileImgPreview.src = "";
-        profileImgPreview.style.display = 'none';
-        avatarPlaceholder.style.display = 'flex';
+        profileImgPreview.src = DEFAULT_AVATAR; // Солдатик
+        profileImgPreview.style.display = 'block';
+        avatarPlaceholder.style.display = 'none';
     }
 
     if (isMyProfile) {
@@ -381,17 +353,6 @@ async function openProfile(uid, isMyProfile) {
         btnUploadAvatar.style.display = 'none'; btnSaveProfile.style.display = 'none';
     }
     profileModal.classList.add('active');
-
-    if (data.avatarBase64) {
-        profileImgPreview.src = data.avatarBase64;
-        profileImgPreview.style.display = 'block';
-        avatarPlaceholder.style.display = 'none';
-    } else {
-        // ПОКАЗЫВАЕМ СОЛДАТИКА ВМЕСТО ПУСТОГО МЕСТА
-        profileImgPreview.src = DEFAULT_AVATAR;
-        profileImgPreview.style.display = 'block';
-        avatarPlaceholder.style.display = 'none';
-    }
 }
 
 btnSaveProfile.addEventListener('click', async () => {
@@ -413,11 +374,18 @@ btnCloseProfile.addEventListener('click', () => profileModal.classList.remove('a
 function updateMyDisplay() {
     if (currentUserData) {
         userDisplay.innerText = `БОЕЦ: ${currentUserData.nickname}`;
-        if (currentUserData.avatarBase64) { myMiniAvatar.src = currentUserData.avatarBase64; myMiniAvatar.style.display = 'block'; } 
-        else { myMiniAvatar.style.display = 'none'; }
+        if (currentUserData.avatarBase64) { 
+            myMiniAvatar.src = currentUserData.avatarBase64; 
+        } else {
+            myMiniAvatar.src = DEFAULT_AVATAR; 
+        }
+        myMiniAvatar.style.display = 'block';
     }
 }
 
+// ==========================================
+// === ПОИСК ===
+// ==========================================
 if (searchInput) {
     searchInput.addEventListener('input', (e) => {
         const text = e.target.value.trim();
@@ -447,20 +415,12 @@ function renderSearchResults(snapshot) {
         if (uid === auth.currentUser.uid) return; 
         const item = document.createElement('div');
         item.className = 'search-item';
-        const avatarHTML = user.avatarBase64 ? `<img src="${user.avatarBase64}" style="width:20px; height:20px; border-radius:50%; margin-right:5px; vertical-align:middle;">` : '';
+        const avatarSrc = user.avatarBase64 || DEFAULT_AVATAR;
+        const avatarHTML = `<img src="${avatarSrc}" style="width:25px; height:25px; border-radius:50%; margin-right:5px; vertical-align:middle; border:1px solid #33ff33;">`;
         item.innerHTML = `<span>${avatarHTML}${user.nickname}</span> <span style="font-size:0.8rem; opacity:0.6;">[СВЯЗАТЬСЯ]</span>`;
         item.onclick = () => { searchInput.value = ''; searchResultsArea.style.display = 'none'; startChat(uid, user.nickname); };
         searchList.appendChild(item);
     });
-
-    const item = document.createElement('div');
-    item.className = 'search-item';
-    
-    // Используем аватар или солдатика
-    const avatarSrc = user.avatarBase64 || DEFAULT_AVATAR;
-    const avatarHTML = `<img src="${avatarSrc}" style="width:25px; height:25px; border-radius:50%; margin-right:8px; vertical-align:middle; border:1px solid #33ff33;">`;
-    
-    item.innerHTML = `<span>${avatarHTML}${user.nickname}</span> <span style="font-size:0.8rem; opacity:0.6;">[СВЯЗАТЬСЯ]</span>`;
 }
 
 async function startChat(targetUid, targetNick) {
@@ -529,21 +489,24 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     } catch (err) { showModal("ОШИБКА ДОСТУПА", 'alert'); }
 });
 
-// --- СПИСОК ЧАТОВ (С УДАЛЕНИЕМ) ---
 // --- СПИСОК ЧАТОВ ---
 function loadMyChats() {
     if (!auth.currentUser) return;
     const q = query(collection(db, "chats"), where("participants", "array-contains", auth.currentUser.uid), orderBy("lastUpdated", "desc"));
-    
     unsubscribeChats = onSnapshot(q, (snap) => {
-        const container = document.getElementById('chats-container'); 
-        container.innerHTML = '';
+        const container = document.getElementById('chats-container'); container.innerHTML = '';
         
-        if (snap.empty) { 
+        // Фильтр удаленных чатов
+        const visibleChats = snap.docs.filter(doc => {
+            const data = doc.data();
+            return !data.hiddenFor || !data.hiddenFor.includes(auth.currentUser.uid);
+        });
+
+        if (visibleChats.length === 0) { 
             document.getElementById('empty-state').style.display = 'flex'; 
         } else {
             document.getElementById('empty-state').style.display = 'none';
-            snap.forEach(async docSnap => {
+            visibleChats.forEach(async docSnap => {
                 const data = docSnap.data();
                 const otherUid = data.participants.find(uid => uid !== auth.currentUser.uid);
                 const otherName = data.participantNames.find(n => n !== currentUserData.nickname) || "UNKNOWN";
@@ -554,7 +517,8 @@ function loadMyChats() {
                 
                 el.innerHTML = `
                     <img id="${imgId}" src="${DEFAULT_AVATAR}" class="chat-list-avatar">
-                    <div>${otherName}</div>
+                    <div style="flex:1;">${otherName}</div>
+                    <button class="btn-trash" onclick="event.stopPropagation(); confirmDeleteChat('${docSnap.id}')">×</button>
                 `;
                 
                 el.onclick = () => openChat(docSnap.id, otherName);
@@ -567,8 +531,7 @@ function loadMyChats() {
                         const imgEl = document.getElementById(imgId);
                         if (imgEl && uData.avatarBase64) { 
                             imgEl.src = uData.avatarBase64; 
-                        } 
-                        // Если аватарки нет - там уже стоит DEFAULT_AVATAR
+                        }
                     }
                 }
             });
@@ -576,16 +539,15 @@ function loadMyChats() {
     });
 }
 
-// --- ОТКРЫТИЕ ЧАТА (С УЧЕТОМ ОЧИСТКИ ИСТОРИИ) ---
+// --- ОТКРЫТИЕ ЧАТА ---
 async function openChat(chatId, chatName) {
     currentChatId = chatId;
     currentChatPartnerAvatar = null;
-    let myClearedAt = null; // Переменная для времени очистки
+    let myClearedAt = null;
     
     document.getElementById('chat-title').innerText = `КАНАЛ: ${chatName}`;
     document.getElementById('msg-form').style.display = 'flex'; 
     document.getElementById('messages-area').innerHTML = ''; 
-    
     chatPanel.classList.add('open');
     if(searchInput) searchInput.blur(); 
 
@@ -593,54 +555,39 @@ async function openChat(chatId, chatName) {
         const chatSnap = await getDoc(doc(db, "chats", chatId));
         if (chatSnap.exists()) {
             const data = chatSnap.data();
-            
-            // 1. Проверяем, когда я чистил этот чат
             if (data.clearedAt && data.clearedAt[auth.currentUser.uid]) {
                 myClearedAt = data.clearedAt[auth.currentUser.uid];
             }
-
-            // 2. Ищем аватарку собеседника
             const partnerUid = data.participants.find(uid => uid !== auth.currentUser.uid);
             if (partnerUid) {
                 const userSnap = await getDoc(doc(db, "users", partnerUid));
-                if (userSnap.exists() && userSnap.data().avatarBase64) {
-                    currentChatPartnerAvatar = userSnap.data().avatarBase64;
-                }
+                if (userSnap.exists() && userSnap.data().avatarBase64) currentChatPartnerAvatar = userSnap.data().avatarBase64;
             }
         }
-    } catch (e) { console.error(e); }
+    } catch (e) {}
 
     if (unsubscribeMessages) unsubscribeMessages();
-    
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "asc"));
-    
     unsubscribeMessages = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
-        const area = document.getElementById('messages-area');
-        area.innerHTML = ''; // Полная перерисовка (проще для фильтрации)
-        
-        snap.forEach((docSnap) => {
-            const msg = docSnap.data();
+        const area = document.getElementById('messages-area'); area.innerHTML = '';
+        snap.forEach((d) => {
+            const m = d.data();
             
-            // --- ФИЛЬТР ИСТОРИИ ---
-            // Если сообщение создано РАНЬШЕ, чем я очистил чат -> пропускаем его
-            if (myClearedAt && msg.createdAt && msg.createdAt.toMillis() <= myClearedAt.toMillis()) {
+            // Фильтр истории
+            if (myClearedAt && m.createdAt && m.createdAt.toMillis() <= myClearedAt.toMillis()) {
                 return;
             }
-            // ----------------------
 
-            // Логика прочтения (как и была)
-            if (msg.senderId !== auth.currentUser.uid && !msg.read && !docSnap.metadata.hasPendingWrites) {
-                updateDoc(doc(db, "chats", chatId, "messages", docSnap.id), { read: true });
+            if (m.senderId !== auth.currentUser.uid && !m.read && !d.metadata.hasPendingWrites) {
+                updateDoc(doc(db, "chats", chatId, "messages", d.id), { read: true });
             }
-            
-            renderMessage(docSnap);
+            renderMessage(d);
         });
-        
         setTimeout(() => { area.scrollTop = area.scrollHeight; }, 50);
     });
 }
 
-// Отправка текста (Форма)
+// Отправка текста
 document.getElementById('msg-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = msgInput.value.trim();
@@ -651,10 +598,9 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
     });
     await updateDoc(doc(db, "chats", currentChatId), { 
         lastUpdated: serverTimestamp(),
-        hiddenFor: arrayRemove(auth.currentUser.uid, currentUserData.uid) // Убираем из скрытых для ОБОИХ, чтобы чат всплыл
+        hiddenFor: [] 
     });
     msgInput.value = '';
-    // Возвращаем кнопку микрофона
     btnSendText.style.display = 'none';
     btnMicRec.style.display = 'flex';
 });
@@ -662,7 +608,6 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
 // Кнопка фото
 btnAttachImg.addEventListener('click', () => { chatImgUpload.value=''; chatImgUpload.click(); });
 
-// Логика просмотра фото
 function viewImage(src, caption) {
     fullImageView.src = src; imageCaptionView.innerText = (caption && caption !== "[ФОТО]") ? caption : "";
     imageViewerModal.classList.add('active');
@@ -670,7 +615,7 @@ function viewImage(src, caption) {
 closeImageViewer.addEventListener('click', () => imageViewerModal.classList.remove('active'));
 imageViewerModal.addEventListener('click', (e) => { if(e.target===imageViewerModal) imageViewerModal.classList.remove('active'); });
 
-// Предпросмотр фото и отправка
+// Предпросмотр фото
 const photoModal = document.getElementById('photo-preview-modal');
 const photoPreviewImg = document.getElementById('photo-preview-img');
 const photoCaptionInput = document.getElementById('photo-caption-input');
@@ -706,51 +651,38 @@ btnConfirmPhoto.addEventListener('click', async () => {
 });
 
 // РЕНДЕР
-// РЕНДЕР СООБЩЕНИЙ
 function renderMessage(docSnap) {
     const msg = docSnap.data();
     const isMine = msg.senderId === auth.currentUser.uid;
-    
     const row = document.createElement('div');
     row.className = `msg-row ${isMine ? 'my' : 'other'}`;
 
-    // АВАТАРКА (для чужих)
     if (!isMine) {
         const avatar = document.createElement('img');
         avatar.className = 'chat-avatar';
-        
-        // Приоритет: 1. Актуальное фото -> 2. Фото из сообщения -> 3. Солдат
         if (currentChatPartnerAvatar) {
             avatar.src = currentChatPartnerAvatar;
         } else if (msg.senderAvatar) {
             avatar.src = msg.senderAvatar;
         } else {
-            avatar.src = DEFAULT_AVATAR; // <--- НАШ СОЛДАТИК
+            avatar.src = DEFAULT_AVATAR; 
         }
-        
         avatar.onclick = () => openProfile(msg.senderId, false);
         row.appendChild(avatar);
     }
 
-    // ТЕЛО СООБЩЕНИЯ
     const div = document.createElement('div');
     div.className = `msg ${isMine ? 'my' : 'other'}`;
     
-    // Имя (для чужих)
     if (!isMine) {
         const nickSpan = document.createElement('div');
         nickSpan.innerText = msg.senderNick;
-        nickSpan.style.fontSize = '0.7rem'; 
-        nickSpan.style.marginBottom = '2px'; 
-        nickSpan.style.color = '#888'; 
-        nickSpan.style.cursor = 'pointer';
+        nickSpan.style.fontSize = '0.7rem'; nickSpan.style.marginBottom = '2px'; nickSpan.style.color = '#888'; nickSpan.style.cursor = 'pointer';
         nickSpan.onclick = () => openProfile(msg.senderId, false);
         div.appendChild(nickSpan);
     }
 
-    // --- КОНТЕНТ ---
     const contentDiv = document.createElement('div');
-    
     if (msg.audioBase64) {
         const audioWrapper = document.createElement('div');
         audioWrapper.className = 'audio-player-wrapper';
@@ -758,13 +690,11 @@ function renderMessage(docSnap) {
         audio.controls = true; audio.src = msg.audioBase64;
         audioWrapper.appendChild(audio);
         contentDiv.appendChild(audioWrapper);
-
     } else if (msg.imageBase64) {
         const img = document.createElement('img');
         img.src = msg.imageBase64; img.className = 'msg-image-content';
         img.onclick = () => viewImage(msg.imageBase64, msg.text);
         contentDiv.appendChild(img);
-        
         if(msg.text && msg.text !== "[ФОТО]") {
             const caption = document.createElement('div');
             caption.innerText = msg.text; caption.style.marginTop = "5px";
@@ -774,7 +704,6 @@ function renderMessage(docSnap) {
         contentDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
     }
     div.appendChild(contentDiv);
-    // -------------------
 
     const metaDiv = document.createElement('div');
     metaDiv.className = 'msg-meta';
@@ -815,85 +744,49 @@ function renderMessage(docSnap) {
     document.getElementById('messages-area').appendChild(row);
 }
 
-// ==========================================
-// === ЛИКВИДАЦИЯ ЧАТОВ ===
-// ==========================================
-const deleteChatModal = document.getElementById('delete-chat-modal');
-let chatToDeleteId = null;
-
-// Вызывается из HTML (кнопка мусорки)
+// --- УДАЛЕНИЕ ЧАТА ---
 window.confirmDeleteChat = (chatId) => {
     chatToDeleteId = chatId;
     deleteChatModal.classList.add('active');
 };
 
-// 1. ОТМЕНА
 document.getElementById('btn-del-cancel').addEventListener('click', () => {
     deleteChatModal.classList.remove('active');
     chatToDeleteId = null;
 });
 
-// 2. ТОЛЬКО ДЛЯ МЕНЯ (Скрыть + Очистить историю)
+// ТОЛЬКО У МЕНЯ (СКРЫТЬ)
 document.getElementById('btn-del-me').addEventListener('click', async () => {
     if (!chatToDeleteId) return;
-    
-    // Блокируем кнопку на секунду
-    const btn = document.getElementById('btn-del-me');
-    btn.disabled = true;
-    btn.innerText = "УДАЛЕНИЕ...";
-
+    const btn = document.getElementById('btn-del-me'); btn.disabled = true; btn.innerText = "УДАЛЕНИЕ...";
     try {
-        // Добавляем ID в скрытые И ставим метку времени "Очищено"
         await updateDoc(doc(db, "chats", chatToDeleteId), {
             hiddenFor: arrayUnion(auth.currentUser.uid),
             [`clearedAt.${auth.currentUser.uid}`]: serverTimestamp()
         });
-        
-        // Закрываем окно (ГАРАНТИРОВАННО)
         deleteChatModal.classList.remove('active');
-        
-        // Если этот чат сейчас открыт — закрываем его визуально
-        if (currentChatId === chatToDeleteId) {
-            document.getElementById('back-btn').click();
-        }
-        
+        if (currentChatId === chatToDeleteId) document.getElementById('back-btn').click();
         chatToDeleteId = null;
-
-    } catch (e) {
-        console.error(e);
-        alert("ОШИБКА: " + e.message);
-    } finally {
-        btn.disabled = false;
-        btn.innerText = "ТОЛЬКО У МЕНЯ (СКРЫТЬ)";
-    }
+    } catch (e) { alert("ОШИБКА"); } finally { btn.disabled = false; btn.innerText = "ТОЛЬКО У МЕНЯ (СКРЫТЬ)"; }
 });
 
-// 3. УНИЧТОЖИТЬ ДЛЯ ВСЕХ
+// УНИЧТОЖИТЬ ДЛЯ ВСЕХ
 document.getElementById('btn-del-all').addEventListener('click', async () => {
     if (!chatToDeleteId) return;
     if (!confirm("ВЫ УВЕРЕНЫ? ЭТО НЕОБРАТИМО.")) return;
-
     try {
-        const chatRef = doc(db, "chats", chatToDeleteId);
-        
-        // Сначала удаляем все сообщения внутри (иначе они зависнут в базе призраками)
         const msgsQ = query(collection(db, "chats", chatToDeleteId, "messages"));
         const msgsSnap = await getDocs(msgsQ);
-        
-        // Удаляем сообщения по одному (Batch был бы лучше, но так проще для понимания)
         const deletePromises = msgsSnap.docs.map(d => deleteDoc(d.ref));
         await Promise.all(deletePromises);
-
-        // Удаляем сам документ чата
-        await deleteDoc(chatRef);
-        
-        // Если этот чат был открыт - закрываем его
-        if (currentChatId === chatToDeleteId) {
-            document.getElementById('back-btn').click(); // Имитируем нажатие "Назад"
-        }
-
+        await deleteDoc(doc(db, "chats", chatToDeleteId));
+        if (currentChatId === chatToDeleteId) document.getElementById('back-btn').click();
         deleteChatModal.classList.remove('active');
-    } catch (e) {
-        alert("ОШИБКА УДАЛЕНИЯ: " + e.message);
-    }
+    } catch (e) { alert("ОШИБКА"); }
 });
+
+window.deleteMsg = async (cId, mId) => { if (await showModal('УДАЛИТЬ?', 'confirm')) await deleteDoc(doc(db, "chats", cId, "messages", mId)); };
+window.editMsg = async (cId, mId, old) => {
+    const val = await showModal('ИЗМЕНИТЬ:', 'prompt', old);
+    if (val && val !== old) await updateDoc(doc(db, "chats", cId, "messages", mId), { text: val, edited: true });
+};
