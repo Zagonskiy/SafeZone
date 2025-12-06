@@ -35,6 +35,12 @@ let currentChatPartnerAvatar = null;
 let mediaRecorder = null;
 let audioChunks = [];
 
+let profileToEdit = null; 
+let currentChatPartnerAvatar = null;
+
+//Дефолт ава
+const DEFAULT_AVATAR = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2333ff33' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='100%25' height='100%25' fill='%23111'/%3E%3Cpath d='M12 2C9 2 7 3.5 7 6v1c0 .5-.5 1-1 1s-1 .5-1 1v2c0 1.5 1 2.5 3 3'/%3E%3Cpath d='M12 2c3 0 5 1.5 5 4v1c0 .5.5 1 1 1s1 .5 1 1v2c0 1.5-1 2.5-3 3'/%3E%3Cpath d='M16 11c0 2.5-1.5 4-4 4s-4-1.5-4-4'/%3E%3Cpath d='M4 22v-2c0-2.5 2-4 4-5'/%3E%3Cpath d='M20 22v-2c0-2.5-2-4-4-5'/%3E%3Cpath d='M8 4h8'/%3E%3C/svg%3E";
+
 // --- DOM ЭЛЕМЕНТЫ ---
 const authScreen = document.getElementById('auth-screen');
 const appInterface = document.getElementById('app-interface');
@@ -375,6 +381,17 @@ async function openProfile(uid, isMyProfile) {
         btnUploadAvatar.style.display = 'none'; btnSaveProfile.style.display = 'none';
     }
     profileModal.classList.add('active');
+
+    if (data.avatarBase64) {
+        profileImgPreview.src = data.avatarBase64;
+        profileImgPreview.style.display = 'block';
+        avatarPlaceholder.style.display = 'none';
+    } else {
+        // ПОКАЗЫВАЕМ СОЛДАТИКА ВМЕСТО ПУСТОГО МЕСТА
+        profileImgPreview.src = DEFAULT_AVATAR;
+        profileImgPreview.style.display = 'block';
+        avatarPlaceholder.style.display = 'none';
+    }
 }
 
 btnSaveProfile.addEventListener('click', async () => {
@@ -435,6 +452,15 @@ function renderSearchResults(snapshot) {
         item.onclick = () => { searchInput.value = ''; searchResultsArea.style.display = 'none'; startChat(uid, user.nickname); };
         searchList.appendChild(item);
     });
+
+    const item = document.createElement('div');
+    item.className = 'search-item';
+    
+    // Используем аватар или солдатика
+    const avatarSrc = user.avatarBase64 || DEFAULT_AVATAR;
+    const avatarHTML = `<img src="${avatarSrc}" style="width:25px; height:25px; border-radius:50%; margin-right:8px; vertical-align:middle; border:1px solid #33ff33;">`;
+    
+    item.innerHTML = `<span>${avatarHTML}${user.nickname}</span> <span style="font-size:0.8rem; opacity:0.6;">[СВЯЗАТЬСЯ]</span>`;
 }
 
 async function startChat(targetUid, targetNick) {
@@ -504,31 +530,20 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
 });
 
 // --- СПИСОК ЧАТОВ (С УДАЛЕНИЕМ) ---
+// --- СПИСОК ЧАТОВ ---
 function loadMyChats() {
     if (!auth.currentUser) return;
-    
-    const q = query(
-        collection(db, "chats"), 
-        where("participants", "array-contains", auth.currentUser.uid),
-        orderBy("lastUpdated", "desc")
-    );
+    const q = query(collection(db, "chats"), where("participants", "array-contains", auth.currentUser.uid), orderBy("lastUpdated", "desc"));
     
     unsubscribeChats = onSnapshot(q, (snap) => {
-        const container = document.getElementById('chats-container');
+        const container = document.getElementById('chats-container'); 
         container.innerHTML = '';
         
-        // Фильтруем чаты, которые мы скрыли "только для себя"
-        const visibleChats = snap.docs.filter(doc => {
-            const data = doc.data();
-            return !data.hiddenFor || !data.hiddenFor.includes(auth.currentUser.uid);
-        });
-
-        if (visibleChats.length === 0) {
-            document.getElementById('empty-state').style.display = 'flex';
+        if (snap.empty) { 
+            document.getElementById('empty-state').style.display = 'flex'; 
         } else {
             document.getElementById('empty-state').style.display = 'none';
-            
-            visibleChats.forEach(async docSnap => {
+            snap.forEach(async docSnap => {
                 const data = docSnap.data();
                 const otherUid = data.participants.find(uid => uid !== auth.currentUser.uid);
                 const otherName = data.participantNames.find(n => n !== currentUserData.nickname) || "UNKNOWN";
@@ -537,29 +552,23 @@ function loadMyChats() {
                 el.className = 'chat-item'; 
                 const imgId = `avatar-chat-${docSnap.id}`;
                 
-                // HTML: Аватар + Имя + КНОПКА УДАЛЕНИЯ (Мусорка)
                 el.innerHTML = `
-                    <img id="${imgId}" src="" class="chat-list-avatar" style="display:none">
-                    <div style="flex:1;">${otherName}</div>
-                    <button class="btn-trash" onclick="event.stopPropagation(); confirmDeleteChat('${docSnap.id}')">×</button>
+                    <img id="${imgId}" src="${DEFAULT_AVATAR}" class="chat-list-avatar">
+                    <div>${otherName}</div>
                 `;
                 
-                // Клик по блоку -> открыть чат
                 el.onclick = () => openChat(docSnap.id, otherName);
                 container.appendChild(el);
 
-                // Загрузка аватарки (как и было)
                 if (otherUid) {
                     const userSnap = await getDoc(doc(db, "users", otherUid));
                     if (userSnap.exists()) {
                         const uData = userSnap.data();
                         const imgEl = document.getElementById(imgId);
-                        if (imgEl && uData.avatarBase64) {
-                            imgEl.src = uData.avatarBase64; imgEl.style.display = 'block';
-                        } else if (imgEl) {
-                             imgEl.style.display = 'block'; imgEl.style.backgroundColor = '#222'; 
-                             imgEl.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
-                        }
+                        if (imgEl && uData.avatarBase64) { 
+                            imgEl.src = uData.avatarBase64; 
+                        } 
+                        // Если аватарки нет - там уже стоит DEFAULT_AVATAR
                     }
                 }
             });
@@ -697,34 +706,51 @@ btnConfirmPhoto.addEventListener('click', async () => {
 });
 
 // РЕНДЕР
+// РЕНДЕР СООБЩЕНИЙ
 function renderMessage(docSnap) {
     const msg = docSnap.data();
     const isMine = msg.senderId === auth.currentUser.uid;
+    
     const row = document.createElement('div');
     row.className = `msg-row ${isMine ? 'my' : 'other'}`;
 
+    // АВАТАРКА (для чужих)
     if (!isMine) {
         const avatar = document.createElement('img');
         avatar.className = 'chat-avatar';
-        if (currentChatPartnerAvatar) avatar.src = currentChatPartnerAvatar;
-        else if (msg.senderAvatar) avatar.src = msg.senderAvatar;
-        else { avatar.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; avatar.style.backgroundColor = '#333'; }
+        
+        // Приоритет: 1. Актуальное фото -> 2. Фото из сообщения -> 3. Солдат
+        if (currentChatPartnerAvatar) {
+            avatar.src = currentChatPartnerAvatar;
+        } else if (msg.senderAvatar) {
+            avatar.src = msg.senderAvatar;
+        } else {
+            avatar.src = DEFAULT_AVATAR; // <--- НАШ СОЛДАТИК
+        }
+        
         avatar.onclick = () => openProfile(msg.senderId, false);
         row.appendChild(avatar);
     }
 
+    // ТЕЛО СООБЩЕНИЯ
     const div = document.createElement('div');
     div.className = `msg ${isMine ? 'my' : 'other'}`;
     
+    // Имя (для чужих)
     if (!isMine) {
         const nickSpan = document.createElement('div');
         nickSpan.innerText = msg.senderNick;
-        nickSpan.style.fontSize = '0.7rem'; nickSpan.style.marginBottom = '2px'; nickSpan.style.color = '#888'; nickSpan.style.cursor = 'pointer';
+        nickSpan.style.fontSize = '0.7rem'; 
+        nickSpan.style.marginBottom = '2px'; 
+        nickSpan.style.color = '#888'; 
+        nickSpan.style.cursor = 'pointer';
         nickSpan.onclick = () => openProfile(msg.senderId, false);
         div.appendChild(nickSpan);
     }
 
+    // --- КОНТЕНТ ---
     const contentDiv = document.createElement('div');
+    
     if (msg.audioBase64) {
         const audioWrapper = document.createElement('div');
         audioWrapper.className = 'audio-player-wrapper';
@@ -732,11 +758,13 @@ function renderMessage(docSnap) {
         audio.controls = true; audio.src = msg.audioBase64;
         audioWrapper.appendChild(audio);
         contentDiv.appendChild(audioWrapper);
+
     } else if (msg.imageBase64) {
         const img = document.createElement('img');
         img.src = msg.imageBase64; img.className = 'msg-image-content';
         img.onclick = () => viewImage(msg.imageBase64, msg.text);
         contentDiv.appendChild(img);
+        
         if(msg.text && msg.text !== "[ФОТО]") {
             const caption = document.createElement('div');
             caption.innerText = msg.text; caption.style.marginTop = "5px";
@@ -746,6 +774,7 @@ function renderMessage(docSnap) {
         contentDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
     }
     div.appendChild(contentDiv);
+    // -------------------
 
     const metaDiv = document.createElement('div');
     metaDiv.className = 'msg-meta';
@@ -785,12 +814,6 @@ function renderMessage(docSnap) {
     row.appendChild(div);
     document.getElementById('messages-area').appendChild(row);
 }
-
-window.deleteMsg = async (cId, mId) => { if (await showModal('УДАЛИТЬ?', 'confirm')) await deleteDoc(doc(db, "chats", cId, "messages", mId)); };
-window.editMsg = async (cId, mId, old) => {
-    const val = await showModal('ИЗМЕНИТЬ:', 'prompt', old);
-    if (val && val !== old) await updateDoc(doc(db, "chats", cId, "messages", mId), { text: val, edited: true });
-};
 
 // ==========================================
 // === ЛИКВИДАЦИЯ ЧАТОВ ===
