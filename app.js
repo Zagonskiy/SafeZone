@@ -1124,7 +1124,7 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 // ==========================================
 
 // ==========================================
-// === 1. Инициализация P2P (ИСПРАВЛЕНО) ===
+// === 1. Инициализация P2P (КРИТИЧЕСКИЕ ИСПРАВЛЕНИЯ) ===
 // ==========================================
 function initPeer(uid) {
     if (peer) return;
@@ -1132,15 +1132,15 @@ function initPeer(uid) {
     console.log("🚀 Initializing PeerJS with ID:", uid);
 
     peer = new Peer(uid, {
-        debug: 1, // Можно поставить 2, чтобы видеть больше логов ошибок
+        debug: 2, // Максимальный уровень логирования для отладки
         config: {
             iceServers: [
-                // 1. Google STUN (Оставляем, они быстрые)
+                // 1. Google STUN серверы
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
 
-                // 2. TURN Серверы (OpenRelay - бесплатно для тестов)
-                // ВАЖНО: Это позволяет обходить строгие NAT и 4G сети
+                // 2. TURN серверы с TCP (КРИТИЧНО для 4G/строгих NAT)
                 {
                     urls: "turn:openrelay.metered.ca:80",
                     username: "openrelayproject",
@@ -1155,44 +1155,68 @@ function initPeer(uid) {
                     urls: "turn:openrelay.metered.ca:443?transport=tcp",
                     username: "openrelayproject",
                     credential: "openrelayproject"
+                },
+                // Дополнительный публичный TURN
+                {
+                    urls: "stun:relay.metered.ca:80"
                 }
             ],
-            iceTransportPolicy: 'all', // Разрешить все (и P2P, и Relay)
-            iceCandidatePoolSize: 10   // Искать маршруты заранее
+            iceTransportPolicy: 'all', 
+            iceCandidatePoolSize: 10,
+            // ВАЖНО: Добавляем ограничения для стабильности
+            sdpSemantics: 'unified-plan'
         }
-    }); 
-    
+    });
+
     peer.on('open', (id) => {
         console.log('✅ My Peer ID is active:', id);
     });
 
-    // ... остальной код (peer.on('call') и peer.on('error')) без изменений ...
-    // Вставьте сюда содержимое вашего старого обработчика call и error
-    
-    // ПОВТОРЯЮ ВАШ КОД ОБРАБОТКИ (ДЛЯ ЦЕЛОСТНОСТИ):
-    peer.on('call', (call) => {
-        console.log("📞 Incoming P2P call!");
-        const answerLogic = (stream) => {
-            call.answer(stream);
+    // КРИТИЧНО: Правильная обработка входящих звонков
+    peer.on('call', async (call) => {
+        console.log("📞 Incoming P2P call from:", call.peer);
+        
+        try {
+            // 1. Сначала получаем микрофон
+            if (!localStream) {
+                console.log("🎤 Запрашиваю микрофон для ответа...");
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    } 
+                });
+            }
+            
+            // 2. Отвечаем на звонок
+            console.log("📤 Отправляю свой аудиопоток...");
+            call.answer(localStream);
+            
+            // 3. ВАЖНО: Ждём удалённый поток
             call.on('stream', (remoteStream) => {
+                console.log("📥 ПОЛУЧЕН удалённый поток!");
                 setupRemoteAudio(remoteStream);
                 startCallTimer();
             });
-            call.on('close', () => endCallLocal());
+            
+            // 4. Обработка закрытия
+            call.on('close', () => {
+                console.log("🔴 P2P соединение закрыто");
+                endCallLocal();
+            });
+            
+            call.on('error', (err) => {
+                console.error("❌ Ошибка в P2P звонке:", err);
+            });
+            
             currentCall = call;
-        };
-        if (localStream) {
-            answerLogic(localStream);
-        } else {
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then((s) => {
-                    localStream = s;
-                    answerLogic(s);
-                })
-                .catch(e => console.error("Mic error:", e));
+            
+        } catch(e) {
+            console.error("🚨 Ошибка при ответе на звонок:", e);
+            endCallLocal();
         }
     });
-
     peer.on('error', (err) => {
         console.error("🚨 PeerJS Error:", err.type, err);
         if (err.type === 'unavailable-id') {
