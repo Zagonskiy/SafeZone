@@ -39,6 +39,16 @@ let isRecording = false;
 let isLockedMode = false;
 let detectedMimeType = '';
 
+// --- ЗВОНКИ ---
+let peer = null;
+let currentCall = null;
+let localStream = null;
+let incomingCallData = null; // Данные из Firestore о входящем
+let activeCallDocId = null; // ID документа звонка в Firestore
+let callTimerInterval = null;
+let callSeconds = 0;
+let isMicMuted = false;
+
 // Дефолт аватар
 const DEFAULT_AVATAR = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2333ff33' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='100%25' height='100%25' fill='%23111'/%3E%3Cpath d='M12 2C9 2 7 3.5 7 6v1c0 .5-.5 1-1 1s-1 .5-1 1v2c0 1.5 1 2.5 3 3'/%3E%3Cpath d='M12 2c3 0 5 1.5 5 4v1c0 .5.5 1 1 1s1 .5 1 1v2c0 1.5-1 2.5-3 3'/%3E%3Cpath d='M16 11c0 2.5-1.5 4-4 4s-4-1.5-4-4'/%3E%3Cpath d='M4 22v-2c0-2.5 2-4 4-5'/%3E%3Cpath d='M20 22v-2c0-2.5-2-4-4-5'/%3E%3Cpath d='M8 4h8'/%3E%3C/svg%3E";
 
@@ -154,6 +164,9 @@ onAuthStateChanged(auth, async (user) => {
             
             updateMyDisplay();
             loadMyChats();
+            // Внутри onAuthStateChanged, после loadMyChats();
+            initPeer(user.uid);
+            listenForIncomingCalls(user.uid);
             
         } catch (e) {
             console.error("Critical Auth Error:", e);
@@ -315,6 +328,10 @@ async function openChat(chatId, chatName) {
     document.getElementById('messages-area').innerHTML = ''; 
     
     chatPanel.classList.add('open');
+    // Показать кнопку звонка
+    if(btnCall) btnCall.style.display = 'flex';
+    // Скрыть кнопку звонка
+    if(btnCall) btnCall.style.display = 'none';
     // Показать кнопку поиска
 if(document.getElementById('btn-toggle-search')) {
     document.getElementById('btn-toggle-search').style.display = 'block';
@@ -1094,3 +1111,304 @@ function updateSearchCount() {
 
 if(btnSearchUp) btnSearchUp.addEventListener('click', () => navigateSearch(-1)); // Вверх (предыдущее в списке DOM, но раннее по времени)
 if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1)); // Вниз
+
+// ==========================================
+// === СИСТЕМА ЗВОНКОВ (WEBRTC + FIRESTORE) ===
+// ==========================================
+
+// 1. Инициализация P2P
+function initPeer(uid) {
+    if (peer) return;
+    // Используем UID как PeerID (очищаем от спецсимволов на всякий случай, хотя firebase uid обычно безопасны)
+    peer = new Peer(uid); 
+    
+    peer.on('open', (id) => {
+        console.log('My Peer ID is: ' + id);
+    });
+
+    peer.on('call', (call) => {
+        // PeerJS событие входящего потока (когда мы уже ответили)
+        navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+            localStream = stream;
+            call.answer(stream); // Отвечаем своим потоком
+            
+            call.on('stream', (remoteStream) => {
+                setupRemoteAudio(remoteStream);
+            });
+            
+            currentCall = call;
+            startCallTimer();
+        });
+    });
+    
+    peer.on('error', (err) => console.error("PeerJS Error:", err));
+}
+
+// 2. Слушаем Firestore на предмет входящих вызовов
+function listenForIncomingCalls(myUid) {
+    const q = query(
+        collection(db, "calls"), 
+        where("receiverId", "==", myUid), 
+        where("status", "==", "offering")
+    );
+    
+    onSnapshot(q, (snap) => {
+        snap.docChanges().forEach((change) => {
+            if (change.type === "added") {
+                const data = change.doc.data();
+                // Проверяем, не старый ли это звонок (больше 30 сек)
+                const now = Date.now();
+                if (data.timestamp && (now - data.timestamp.toMillis()) > 45000) return;
+                
+                showIncomingCallModal(change.doc.id, data);
+            }
+        });
+    });
+}
+
+// 3. UI: Показать входящий
+function showIncomingCallModal(docId, data) {
+    if (currentCall || activeCallDocId) return; // Уже занят
+    
+    incomingCallData = { id: docId, ...data };
+    activeCallDocId = docId;
+    
+    document.getElementById('incoming-call-modal').classList.add('active');
+    document.getElementById('incoming-caller-name').innerText = data.callerName;
+    document.getElementById('incoming-call-avatar').src = data.callerAvatar || DEFAULT_AVATAR;
+    
+    // Играть звук рингтона (опционально, если есть файл)
+}
+
+// 4. Начало звонка (исходящий)
+const btnCall = document.getElementById('btn-call');
+
+// В openChat добавьте: if(btnCall) btnCall.style.display = 'flex';
+// В back-btn listener добавьте: if(btnCall) btnCall.style.display = 'none';
+
+if (btnCall) {
+    btnCall.addEventListener('click', async () => {
+        if (!currentChatId || !auth.currentUser) return;
+        
+        // Получаем ID собеседника
+        const chatDoc = await getDoc(doc(db, "chats", currentChatId));
+        if (!chatDoc.exists()) return;
+        
+        const participants = chatDoc.data().participants;
+        const receiverId = participants.find(id => id !== auth.currentUser.uid);
+        if (!receiverId) return;
+
+        startVoiceCall(receiverId);
+    });
+}
+
+async function startVoiceCall(receiverId) {
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch(e) {
+        alert("ОШИБКА МИКРОФОНА: " + e.message);
+        return;
+    }
+
+    // Показываем интерфейс
+    showActiveCallScreen(currentUserData.nickname, "СОЕДИНЕНИЕ..."); // Показываем имя пока не знаем точно
+    // Загружаем имя партнера
+    getDoc(doc(db, "users", receiverId)).then(s => {
+        if(s.exists()) document.getElementById('call-partner-name').innerText = s.data().nickname;
+    });
+
+    // Создаем запись в Firestore
+    const callDocRef = await addDoc(collection(db, "calls"), {
+        callerId: auth.currentUser.uid,
+        callerName: currentUserData.nickname,
+        callerAvatar: currentUserData.avatarBase64,
+        receiverId: receiverId,
+        chatId: currentChatId,
+        status: "offering",
+        timestamp: serverTimestamp()
+    });
+    
+    activeCallDocId = callDocRef.id;
+
+    // Слушаем изменения статуса этого звонка (ответил/сбросил)
+    onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        
+        if (data.status === "answered") {
+            document.getElementById('call-status-text').innerText = "ПОДКЛЮЧЕНИЕ P2P...";
+            // Инициируем PeerJS звонок
+            const call = peer.call(receiverId, localStream);
+            
+            call.on('stream', (remoteStream) => {
+                setupRemoteAudio(remoteStream);
+                startCallTimer();
+            });
+            call.on('close', () => endCallLocal());
+            call.on('error', () => endCallLocal());
+            currentCall = call;
+        } 
+        else if (data.status === "rejected") {
+            document.getElementById('call-status-text').innerText = "ОТКЛОНЕНО";
+            logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
+            setTimeout(endCallLocal, 1500);
+        }
+        else if (data.status === "ended") {
+             document.getElementById('call-status-text').innerText = "ЗАВЕРШЕН";
+             setTimeout(endCallLocal, 1000);
+        }
+    });
+}
+
+// 5. Ответ на звонок
+document.getElementById('btn-answer-call').addEventListener('click', async () => {
+    document.getElementById('incoming-call-modal').classList.remove('active');
+    
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch(e) {
+        alert("Нет доступа к микрофону");
+        rejectCall();
+        return;
+    }
+
+    showActiveCallScreen(incomingCallData.callerName, "ПОДКЛЮЧЕНИЕ...");
+    
+    // Обновляем статус в Firestore
+    await updateDoc(doc(db, "calls", activeCallDocId), { status: "answered" });
+    
+    // Слушаем завершение
+    onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
+        if (snap.exists() && snap.data().status === "ended") {
+            endCallLocal();
+        }
+    });
+});
+
+// 6. Отклонение
+document.getElementById('btn-decline-call').addEventListener('click', rejectCall);
+
+async function rejectCall() {
+    document.getElementById('incoming-call-modal').classList.remove('active');
+    if (activeCallDocId) {
+        await updateDoc(doc(db, "calls", activeCallDocId), { status: "rejected" });
+        activeCallDocId = null;
+        incomingCallData = null;
+    }
+}
+
+// 7. Сброс / Завершение (Красная кнопка)
+document.getElementById('btn-hangup').addEventListener('click', async () => {
+    if (activeCallDocId) {
+        // Логируем в чат перед выходом, если мы были в разговоре
+        if (callSeconds > 0) {
+            logCallToChat(`📞 ЗВОНОК ЗАВЕРШЕН (${formatTime(callSeconds)})`);
+        } else if (document.getElementById('call-status-text').innerText === "СОЕДИНЕНИЕ...") {
+            logCallToChat("↩ ЗВОНОК ОТМЕНЕН");
+        }
+
+        // Ставим статус ended, чтобы собеседник отключился
+        await updateDoc(doc(db, "calls", activeCallDocId), { status: "ended" });
+    }
+    endCallLocal();
+});
+
+// Общая функция очистки
+function endCallLocal() {
+    document.getElementById('active-call-screen').classList.remove('active');
+    document.getElementById('incoming-call-modal').classList.remove('active');
+    
+    if (currentCall) {
+        currentCall.close();
+        currentCall = null;
+    }
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+    }
+    
+    const remoteAudio = document.getElementById('remote-audio');
+    if (remoteAudio) remoteAudio.srcObject = null;
+    
+    stopCallTimer();
+    activeCallDocId = null;
+    incomingCallData = null;
+    isMicMuted = false;
+    updateMicIcon();
+}
+
+// 8. Управление аудио и таймер
+function setupRemoteAudio(stream) {
+    const audioEl = document.getElementById('remote-audio');
+    audioEl.srcObject = stream;
+    audioEl.play().catch(e => console.log("Autoplay error:", e));
+    document.getElementById('call-status-text').innerText = "В ЭФИРЕ";
+    document.getElementById('call-status-text').style.color = "#33ff33";
+}
+
+document.getElementById('btn-mic-toggle').addEventListener('click', () => {
+    if (!localStream) return;
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack) {
+        isMicMuted = !isMicMuted;
+        audioTrack.enabled = !isMicMuted;
+        updateMicIcon();
+    }
+});
+
+function updateMicIcon() {
+    const btn = document.getElementById('btn-mic-toggle');
+    if (isMicMuted) {
+        btn.classList.add('muted');
+        btn.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+    } else {
+        btn.classList.remove('muted');
+        btn.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+    }
+}
+
+function showActiveCallScreen(name, status) {
+    document.getElementById('active-call-screen').classList.add('active');
+    document.getElementById('call-partner-name').innerText = name;
+    document.getElementById('call-status-text').innerText = status;
+    document.getElementById('call-status-text').style.color = "#888";
+    callSeconds = 0;
+    document.getElementById('call-timer').innerText = "00:00";
+}
+
+function startCallTimer() {
+    stopCallTimer();
+    callTimerInterval = setInterval(() => {
+        callSeconds++;
+        document.getElementById('call-timer').innerText = formatTime(callSeconds);
+    }, 1000);
+}
+
+function stopCallTimer() {
+    if (callTimerInterval) clearInterval(callTimerInterval);
+    callTimerInterval = null;
+}
+
+function formatTime(secs) {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+}
+
+// 9. Логирование в чат
+async function logCallToChat(text) {
+    if (!currentChatId || !auth.currentUser) return;
+    try {
+        await addDoc(collection(db, "chats", currentChatId, "messages"), {
+            text: text, 
+            senderId: auth.currentUser.uid, 
+            senderNick: currentUserData.nickname,
+            senderAvatar: currentUserData.avatarBase64 || null, 
+            createdAt: serverTimestamp(), 
+            edited: false,
+            read: false,
+            type: 'system' // Специальный тип, можно стилизовать отдельно
+        });
+        await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
+    } catch(e) { console.error("Log error", e); }
+}
