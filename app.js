@@ -609,17 +609,32 @@ btnConfirmPhoto.addEventListener('click', async () => {
 // ==========================================
 // === РЕНДЕР И ПРОСМОТР ===
 // ==========================================
+// --- ПРОСМОТРЩИК (LIGHTBOX) ---
 function viewMedia(type, src, caption) {
+    // Сбрасываем дисплеи
+    fullImageView.style.display = 'none';
+    fullVideoView.style.display = 'none';
+    
     if (type === 'video') {
-        fullImageView.style.display = 'none'; fullVideoView.style.display = 'block'; fullVideoView.src = src;
-        fullVideoView.play().catch(e=>{});
+        fullVideoView.style.display = 'block';
+        fullVideoView.src = src;
+        // Пытаемся запустить автоплей (может быть заблокирован браузером со звуком)
+        fullVideoView.play().catch(() => {}); 
     } else {
-        fullVideoView.style.display = 'none'; fullVideoView.pause(); fullImageView.style.display = 'block'; fullImageView.src = src;
+        fullImageView.style.display = 'block';
+        fullImageView.src = src;
+        // Останавливаем видео, если оно играло
+        fullVideoView.pause();
+        fullVideoView.src = "";
     }
-    imageCaptionView.innerText = (caption && caption !== "[ФОТО]" && caption !== "[ВИДЕО]") ? caption : "";
+    
+    // Текст
+    const cleanCaption = (caption && caption !== "[ФОТО]" && caption !== "[ВИДЕО]") ? caption : "";
+    imageCaptionView.innerText = cleanCaption;
+    
+    // Показываем окно (класс active переключает display: flex в CSS)
     imageViewerModal.classList.add('active');
 }
-closeImageViewer.addEventListener('click', () => { imageViewerModal.classList.remove('active'); fullVideoView.pause(); fullVideoView.src = ""; });
 
 function renderMessage(docSnap) {
     const msg = docSnap.data();
