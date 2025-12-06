@@ -95,7 +95,7 @@
                     </div>
 
                     <form id="msg-form" class="msg-input-area" style="display: none;">
-                        <input type="file" id="chat-img-upload" accept="image/*" style="display:none">
+                        <input type="file" id="chat-img-upload" accept="image/*, video/*" style="display:none">
                         
                         <button type="button" id="btn-attach-img" class="btn-metal btn-icon" style="margin-right:0; border-right:none;">+</button>
                         
@@ -123,24 +123,20 @@
     <div id="profile-modal" class="modal-overlay">
         <div class="modal-box profile-box">
             <div class="modal-title">/// ЛИЧНОЕ ДОСЬЕ ///</div>
-            
             <div class="profile-avatar-container">
                 <img id="profile-img-preview" src="" class="profile-avatar-large">
                 <div id="avatar-placeholder" class="avatar-placeholder">НЕТ ФОТО</div>
                 <input type="file" id="avatar-upload" accept="image/*" style="display: none;">
                 <button id="btn-upload-avatar" class="btn-small" style="margin-top:5px;">ЗАГРУЗИТЬ ФОТО</button>
             </div>
-
             <div class="input-group">
                 <label>ПОЗЫВНОЙ</label>
                 <input type="text" id="profile-nick-input" disabled>
             </div>
-            
             <div class="input-group">
                 <label>ХАРАКТЕРИСТИКА (ОПИСАНИЕ)</label>
                 <textarea id="profile-desc-input" class="terminal-textarea" placeholder="Нет данных..." disabled></textarea>
             </div>
-
             <div class="modal-actions">
                 <button id="btn-close-profile" class="btn-small">ЗАКРЫТЬ</button>
                 <button id="btn-save-profile" class="btn-metal danger" style="display:none">СОХРАНИТЬ ДАННЫЕ</button>
@@ -160,18 +156,17 @@
         </div>
     </div>
 
-    <script type="module" src="app.js"></script>
-
     <div id="photo-preview-modal" class="modal-overlay" style="z-index: 15000;">
         <div class="modal-box" style="width: 400px; max-width: 90%;">
             <div class="modal-title">/// ПОДТВЕРЖДЕНИЕ ДАННЫХ ///</div>
             
             <div class="preview-container">
-                <img id="photo-preview-img" src="" alt="Preview">
+                <img id="photo-preview-img" src="" alt="Preview" style="display:none">
+                <video id="video-preview-el" controls style="display:none; max-width:100%; max-height:30vh;"></video>
             </div>
 
             <div class="input-group">
-                <label>ПОДПИСЬ К СНИМКУ</label>
+                <label>ПОДПИСЬ К МАТЕРИАЛУ</label>
                 <input type="text" id="photo-caption-input" placeholder="Введите описание..." autocomplete="off">
             </div>
 
@@ -184,7 +179,10 @@
                         
     <div id="image-viewer-modal" class="modal-overlay" style="z-index: 30000; background: rgba(0,0,0,0.95);">
         <span id="close-image-viewer" class="close-btn">&times;</span>
-        <img class="modal-content-img" id="full-image-view">
+        
+        <img class="modal-content-img" id="full-image-view" style="display:none">
+        <video class="modal-content-img" id="full-video-view" controls style="display:none"></video>
+        
         <div id="image-caption-view" class="caption-text"></div>
     </div>
 
@@ -192,7 +190,6 @@
         <div class="modal-box">
             <div class="modal-title" style="color: var(--alert-red); border-color: var(--alert-red);">/// ЛИКВИДАЦИЯ КАНАЛА ///</div>
             <p class="modal-text">ВЫБЕРИТЕ МЕТОД ЗАЧИСТКИ:</p>
-            
             <div class="modal-actions" style="flex-direction: column; gap: 10px;">
                 <button id="btn-del-me" class="btn-metal">ТОЛЬКО У МЕНЯ (СКРЫТЬ)</button>
                 <button id="btn-del-all" class="btn-metal danger">УНИЧТОЖИТЬ ДЛЯ ВСЕХ</button>
@@ -200,5 +197,7 @@
             </div>
         </div>
     </div>
+
+    <script type="module" src="app.js"></script>
 </body>
 </html>
