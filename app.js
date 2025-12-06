@@ -1390,41 +1390,6 @@ async function startVoiceCall(receiverId) {
     });
 }
             
-            // Добавляем слушатель ошибок специально для этого звонка
-            // Если вылетит peer-unavailable, пробуем снова
-            const retryHandler = (err) => {
-                if (err.type === 'peer-unavailable' && attempts < 4) {
-                    console.log(`♻️ Собеседник не найден (попытка ${attempts}/4). Жду 1.5 сек...`);
-                    setTimeout(tryConnect, 1500);
-                }
-            };
-            peer.on('error', retryHandler);
-            
-            // Удаляем слушатель при завершении звонка, чтобы не плодить их
-            const originalEnd = window.endCallLocal;
-            window.endCallLocal = () => {
-                peer.off('error', retryHandler);
-                // Тут вызываем старую функцию очистки, если она была (или просто копируем логику очистки)
-                document.getElementById('active-call-screen').classList.remove('active');
-                document.getElementById('incoming-call-modal').classList.remove('active');
-                if (currentCall) { currentCall.close(); currentCall = null; }
-                if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-                stopCallTimer();
-                activeCallDocId = null;
-                incomingCallData = null;
-            };
-    
-        else if (data.status === "rejected") {
-            document.getElementById('call-status-text').innerText = "ОТКЛОНЕНО";
-            logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
-            setTimeout(endCallLocal, 1500);
-        }
-        else if (data.status === "ended") {
-             document.getElementById('call-status-text').innerText = "ЗАВЕРШЕН";
-             setTimeout(endCallLocal, 1000);
-        }
-    });
-}
 
 // 5. Ответ на звонок (МОБИЛЬНАЯ ВЕРСИЯ)
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
