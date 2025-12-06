@@ -1167,6 +1167,12 @@ function initPeer(uid) {
                 })
                 .catch(e => console.error("Mic error:", e));
         }
+        setInterval(() => {
+            if (peer && peer.disconnected) {
+                console.log("🔄 PeerJS отключился (сон мобильного). Переподключаюсь...");
+                peer.reconnect();
+            }
+        }, 5000);
     });
     
     // Глобальная обработка ошибок PeerJS
@@ -1280,43 +1286,55 @@ async function startVoiceCall(receiverId) {
         const data = snap.data();
         
         if (data.status === "answered") {
-            document.getElementById('call-status-text').innerText = "ПОДКЛЮЧЕНИЕ P2P...";
+            document.getElementById('call-status-text').innerText = "УСТАНОВКА СВЯЗИ...";
+            console.log("⚡ Собеседник ответил. Начинаем P2P соединение...");
+
+            // Функция агрессивного дозвона
+            let connectAttempts = 0;
+            const maxAttempts = 5; // Пробуем 5 раз (в течение 10-15 секунд)
             
-            // Функция попытки дозвона
-            let attempts = 0;
-            const tryConnect = () => {
-                attempts++;
-                console.log(`📞 Попытка P2P соединения #${attempts} с ID: ${receiverId}`);
-                
+            const attemptConnection = () => {
+                connectAttempts++;
+                console.log(`📡 Попытка соединения #${connectAttempts} с ID: ${receiverId}`);
+                document.getElementById('call-status-text').innerText = `ПОДКЛЮЧЕНИЕ (${connectAttempts})...`;
+
+                // Пытаемся позвонить
                 const call = peer.call(receiverId, localStream);
-                
+
                 if (!call) {
-                    console.warn("⚠️ PeerJS не создал объект звонка. Ретрай...");
-                    if(attempts < 4) setTimeout(tryConnect, 1000);
+                    console.warn("⚠️ PeerJS не вернул объект звонка (глюк библиотеки).");
+                    if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 2000);
                     return;
                 }
 
-                // В PeerJS ошибка отсутствия пира всплывает не в call.on('error'),
-                // а через секунду в глобальном peer.on('error'). 
-                // Поэтому ставим "ловушку" на глобальный таймер.
-                
+                // Таймер-страховка: Если через 5 секунд нет потока, пробуем снова
+                const connectionTimeout = setTimeout(() => {
+                    console.warn("⏰ Тайм-аут соединения. Пробуем перезвонить...");
+                    if (currentCall) currentCall.close();
+                    if (connectAttempts < maxAttempts) attemptConnection();
+                }, 5000);
+
                 call.on('stream', (remoteStream) => {
-                    console.log("✅ P2P поток получен!");
+                    clearTimeout(connectionTimeout); // Отменяем таймер ретрая
+                    console.log("✅ УРА! Поток получен!");
                     setupRemoteAudio(remoteStream);
                     startCallTimer();
                 });
-                
+
                 call.on('close', () => endCallLocal());
-                call.on('error', (e) => {
-                    console.error("Ошибка звонка:", e);
-                    endCallLocal();
-                });
                 
+                call.on('error', (err) => {
+                    console.error("Call Error:", err);
+                    clearTimeout(connectionTimeout);
+                    if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 1500);
+                });
+
                 currentCall = call;
             };
 
-            // Первая попытка через 500мс
-            setTimeout(tryConnect, 500);
+            // Даем телефону 1 секунду на "раздупление" после нажатия кнопки
+            setTimeout(attemptConnection, 1000);
+        }
             
             // Добавляем слушатель ошибок специально для этого звонка
             // Если вылетит peer-unavailable, пробуем снова
@@ -1354,29 +1372,50 @@ async function startVoiceCall(receiverId) {
     });
 }
 
-// 5. Ответ на звонок
+// 5. Ответ на звонок (МОБИЛЬНАЯ ВЕРСИЯ)
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
     document.getElementById('incoming-call-modal').classList.remove('active');
     
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch(e) {
-        alert("Нет доступа к микрофону");
-        rejectCall();
-        return;
+    // --- ВАЖНО: Разблокировка аудио для iPhone/Android ---
+    // Создаем пустой аудио-контекст, чтобы "пробить" автоплей
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
     }
+    // -----------------------------------------------------
 
-    showActiveCallScreen(incomingCallData.callerName, "ПОДКЛЮЧЕНИЕ...");
-    
-    // Обновляем статус в Firestore
-    await updateDoc(doc(db, "calls", activeCallDocId), { status: "answered" });
-    
-    // Слушаем завершение
-    onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
-        if (snap.exists() && snap.data().status === "ended") {
-            endCallLocal();
-        }
-    });
+    try {
+        // Сразу показываем экран, чтобы пользователь видел реакцию
+        showActiveCallScreen(incomingCallData.callerName, "ЗАПУСК МИКРОФОНА...");
+        
+        // Запрашиваем микрофон
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Обновляем статус для визуализации
+        document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ P2P...";
+
+        // --- ВАЖНО: Сначала готовим PeerJS, потом говорим базе, что ответили ---
+        // Если мы сначала обновим базу, компьютер позвонит нам раньше, чем мы готовы.
+        
+        // Ставим небольшую задержку, чтобы PeerJS "проснулся" на телефоне
+        setTimeout(async () => {
+            // Только теперь обновляем статус в Firestore
+            await updateDoc(doc(db, "calls", activeCallDocId), { status: "answered" });
+            
+            // Слушаем завершение
+            const unsub = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
+                if (snap.exists() && snap.data().status === "ended") {
+                    unsub(); // Отписываемся
+                    endCallLocal();
+                }
+            });
+        }, 500);
+
+    } catch(e) {
+        console.error(e);
+        alert("Ошибка доступа к микрофону: " + e.message);
+        rejectCall();
+    }
 });
 
 // 6. Отклонение
