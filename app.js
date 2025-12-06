@@ -1281,7 +1281,7 @@ async function startVoiceCall(receiverId) {
     
     activeCallDocId = callDocRef.id;
 
-    // --- СЛУШАЕМ ИЗМЕНЕНИЯ СТАТУСА (ГЛАВНАЯ ЛОГИКА) ---
+    // Слушаем изменения статуса этого звонка (ответил/сбросил)
     onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
         if (!snap.exists()) return;
         const data = snap.data();
@@ -1338,6 +1338,43 @@ async function startVoiceCall(receiverId) {
 
             // Запускаем дозвон через 1 секунду (даем телефону время проснуться)
             setTimeout(attemptConnection, 1000);
+
+            // Добавляем слушатель ошибок специально для этого звонка
+            // Если вылетит peer-unavailable, пробуем снова
+            const retryHandler = (err) => {
+                if (err.type === 'peer-unavailable' && connectAttempts < 4) {
+                    console.log(`♻️ Собеседник не найден. Жду 1.5 сек...`);
+                    setTimeout(attemptConnection, 1500);
+                }
+            };
+            peer.on('error', retryHandler);
+            
+            // Удаляем слушатель при завершении звонка, чтобы не плодить их
+            // Сохраняем ссылку на оригинальную функцию очистки, если нужно, но здесь переопределяем для чистоты
+            window.endCallLocal = () => {
+                peer.off('error', retryHandler);
+                
+                document.getElementById('active-call-screen').classList.remove('active');
+                document.getElementById('incoming-call-modal').classList.remove('active');
+                
+                if (currentCall) { 
+                    currentCall.close(); 
+                    currentCall = null; 
+                }
+                if (localStream) { 
+                    localStream.getTracks().forEach(t => t.stop()); 
+                    localStream = null; 
+                }
+                
+                const remoteAudio = document.getElementById('remote-audio');
+                if (remoteAudio) remoteAudio.srcObject = null;
+
+                stopCallTimer();
+                activeCallDocId = null;
+                incomingCallData = null;
+                isMicMuted = false;
+                updateMicIcon();
+            };
         } 
         // 2. ЗВОНОК ОТКЛОНЕН
         else if (data.status === "rejected") {
