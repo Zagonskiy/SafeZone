@@ -1123,31 +1123,30 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 // === СИСТЕМА ЗВОНКОВ (WEBRTC + FIRESTORE) ===
 // ==========================================
 
-// 1. Инициализация P2P (FIXED)
+// 1. Инициализация P2P (Базовая версия)
 function initPeer(uid) {
-    // Если пир уже есть и он ЖИВОЙ - не создаем дубликат
+    // Если пир уже есть и жив — не трогаем
     if (peer && !peer.destroyed) return;
     
-    console.log("🚀 Initializing PeerJS with ID:", uid);
+    console.log("🚀 Initializing PeerJS...");
 
     peer = new Peer(uid, {
         debug: 1,
         config: {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' }
+                { urls: 'stun:stun1.l.google.com:19302' }
             ]
         }
     }); 
     
     peer.on('open', (id) => {
-        console.log('✅ My Peer ID is active:', id);
+        console.log('✅ PeerJS Ready. ID:', id);
     });
 
+    // Обработка входящих звонков
     peer.on('call', (call) => {
-        console.log("📞 Incoming P2P call detected!");
-        
+        console.log("📞 Incoming call!");
         const answerLogic = (stream) => {
             call.answer(stream);
             call.on('stream', (remoteStream) => {
@@ -1155,56 +1154,21 @@ function initPeer(uid) {
                 startCallTimer();
             });
             call.on('close', () => endCallLocal());
-            // Добавляем обработку ошибок внутри звонка
-            call.on('error', (e) => console.error("Call error:", e));
             currentCall = call;
         };
 
-        if (localStream) {
-            answerLogic(localStream);
-        } else {
+        if (localStream) answerLogic(localStream);
+        else {
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then((s) => {
                     localStream = s;
                     answerLogic(s);
                 })
-                .catch(e => console.error("Mic error:", e));
+                .catch(e => console.error(e));
         }
     });
     
-    peer.on('error', (err) => {
-        console.error("🚨 PeerJS Error:", err.type);
-        // Не пытаемся реконнектить здесь, чтобы не вызвать циклическую ошибку.
-        // allow ensurePeerConnected to handle it on user action.
-    });
-
-    peer.on('disconnected', () => {
-        console.log("🔌 Peer disconnected.");
-        // Можно попробовать мягкий реконнект, но с проверкой
-        if (peer && !peer.destroyed) {
-            peer.reconnect();
-        }
-    });
-
-    // ХАК: Пингуем сервер (БЕЗОПАСНАЯ ВЕРСИЯ)
-    // Очищаем предыдущий интервал, если он был, чтобы не плодить их
-    if (window.peerKeepAliveInterval) clearInterval(window.peerKeepAliveInterval);
-    
-    window.peerKeepAliveInterval = setInterval(() => {
-        // Ключевое исправление: проверяем !peer.destroyed перед реконнектом
-        if (peer && !peer.destroyed && peer.disconnected) {
-            console.log("💓 Force Reconnect (Keep-Alive)...");
-            peer.reconnect();
-        }
-    }, 5000);
-
-    // Удаляем старый листенер перед добавлением нового (на всякий случай)
-    window.removeEventListener('beforeunload', cleanupPeer);
-    window.addEventListener('beforeunload', cleanupPeer);
-}
-
-function cleanupPeer() {
-    if (peer) peer.destroy();
+    peer.on('error', (err) => console.error("Peer Error:", err.type));
 }
 // 2. Слушаем Firestore на предмет входящих вызовов
 function listenForIncomingCalls(myUid) {
@@ -1293,92 +1257,36 @@ async function startVoiceCall(receiverId) {
         if (!snap.exists()) return;
         const data = snap.data();
         
-        // --- СЦЕНАРИЙ: АБОНЕНТ НАЖАЛ "ОТВЕТИТЬ" ---
+        // Внутри onSnapshot...
         if (data.status === "answered") {
-            if (currentCall) return; // Уже звоним
+            if (currentCall) return;
 
-            document.getElementById('call-status-text').innerText = "УСТАНОВКА СВЯЗИ...";
-            console.log("⚡ Получен ответ. Начинаем дозвон...");
+            document.getElementById('call-status-text').innerText = "СОЕДИНЕНИЕ...";
+            
+            // --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Берем специальный ID из базы, если он есть ---
+            const targetPeerId = data.pickupId || receiverId; 
+            console.log(`⚡ Звоню на точный ID: ${targetPeerId}`);
 
-            let attempt = 0;
-            const maxAttempts = 10;
-            let retryTimer = null;
+            // Даем телефону 1 сек на подготовку (на всякий случай)
+            setTimeout(() => {
+                const call = peer.call(targetPeerId, localStream);
 
-            // Обработчик ошибки "Абонент не в сети"
-            const unavailableHandler = (err) => {
-                if (err.type === 'peer-unavailable') {
-                    console.warn(`♻️ Абонент не в сети PeerJS (Попытка ${attempt}/${maxAttempts}). Ждем...`);
-                    // Не ретраим мгновенно! Ждем 2 секунды.
-                    // Если попытки кончились - выходим.
-                    if (attempt >= maxAttempts) {
-                        alert("Не удалось соединиться. Абонент оффлайн.");
-                        endCallLocal(); 
-                    }
-                }
-            };
-            peer.on('error', unavailableHandler);
-
-            // Функция дозвона
-            const tryCall = () => {
-                attempt++;
-                if (attempt > maxAttempts) {
-                    alert("Сбой соединения (Тайм-аут)");
-                    endCallLocal();
+                if (!call) {
+                    console.error("Сбой вызова PeerJS");
                     return;
                 }
 
-                document.getElementById('call-status-text').innerText = `ПОДКЛЮЧЕНИЕ (${attempt})...`;
-                console.log(`📡 Попытка call #${attempt} -> ${receiverId}`);
+                call.on('stream', (remoteStream) => {
+                    console.log("✅ Поток получен!");
+                    setupRemoteAudio(remoteStream);
+                    startCallTimer();
+                });
 
-                // Самый важный момент: PeerJS иногда кэширует ошибки.
-                // Мы просто вызываем call. Если ID нет, сработает глобальный peer.on('error')
-                const call = peer.call(receiverId, localStream);
-
-                // Если вызов создался, вешаем слушатели
-                if (call) {
-                    call.on('stream', (remoteStream) => {
-                        console.log("✅ P2P СОЕДИНЕНИЕ УСТАНОВЛЕНО!");
-                        // Очищаем таймеры ретрая
-                        if (retryTimer) clearTimeout(retryTimer);
-                        peer.off('error', unavailableHandler); 
-                        
-                        setupRemoteAudio(remoteStream);
-                        startCallTimer();
-                    });
-
-                    call.on('close', () => endCallLocal());
-                    call.on('error', (e) => console.error("Call Error:", e));
-                    
-                    currentCall = call;
-                }
-
-                // Если соединения нет через 2.5 секунды — пробуем снова
-                // Это покроет и случай peer-unavailable, и просто плохую сеть
-                retryTimer = setTimeout(() => {
-                    console.log("⏰ Нет ответа от PeerJS, пробуем снова...");
-                    if (currentCall) currentCall.close();
-                    tryCall();
-                }, 2500);
-            };
-
-            // Первая попытка с задержкой (даем телефону время)
-            setTimeout(tryCall, 1000);
-
-            // Переопределяем очистку
-            window.endCallLocal = () => {
-                if (retryTimer) clearTimeout(retryTimer);
-                peer.off('error', unavailableHandler);
-                // Стандартная очистка...
-                document.getElementById('active-call-screen').classList.remove('active');
-                document.getElementById('incoming-call-modal').classList.remove('active');
-                if (currentCall) { currentCall.close(); currentCall = null; }
-                if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-                const el = document.getElementById('remote-audio');
-                if(el) el.srcObject = null;
-                stopCallTimer();
-                activeCallDocId = null;
-                unsub(); // Отписка от базы
-            };
+                call.on('close', () => endCallLocal());
+                call.on('error', (e) => console.error("Call error:", e));
+                
+                currentCall = call;
+            }, 1000);
         } 
         else if (data.status === "rejected") {
             logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
@@ -1389,30 +1297,55 @@ async function startVoiceCall(receiverId) {
         }
     });
 }
-// 5. Ответ на звонок (ИСПРАВЛЕННАЯ ВЕРСИЯ С ОЖИДАНИЕМ)
+// 5. Ответ на звонок (С ГЕНЕРАЦИЕЙ НОВОГО ID)
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
     document.getElementById('incoming-call-modal').classList.remove('active');
     
-    // 1. Разблокировка аудио (Chrome/iOS Hack)
+    // 1. Разблокировка аудио
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
 
     try {
-        showActiveCallScreen(incomingCallData.callerName, "ПОДКЛЮЧЕНИЕ К СЕТИ...");
+        showActiveCallScreen(incomingCallData.callerName, "СОЗДАНИЕ КАНАЛА...");
         
-        // 2. Получаем доступ к микрофону
+        // 2. Получаем микрофон
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         
-        // 3. ЖДЕМ, ПОКА PEERJS РЕАЛЬНО ПОДКЛЮЧИТСЯ
-        // Это ключевой момент: мы не обновляем базу, пока не убедимся, что мы в сети
-        await ensurePeerConnected();
-
-        document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ СОБЕСЕДНИКА...";
-        console.log("✅ Сеть готова. Отправляем сигнал ответа в базу...");
-
-        // 4. Только теперь обновляем статус в Firestore
-        await updateDoc(doc(db, "calls", activeCallDocId), { status: "answered" });
+        // 3. УБИВАЕМ СТАРЫЙ PEER И СОЗДАЕМ НОВЫЙ С УНИКАЛЬНЫМ ID
+        if (peer) peer.destroy();
         
+        // Генерируем уникальный суффикс, чтобы сервер PeerJS точно принял нас
+        const sessionPeerId = auth.currentUser.uid + '-' + Date.now();
+        console.log("🆕 Создаю свежий PeerID для звонка:", sessionPeerId);
+
+        peer = new Peer(sessionPeerId, {
+            config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+        });
+
+        // Ждем, пока новый ID зарегистрируется на сервере
+        peer.on('open', async (id) => {
+            console.log("✅ Сеть готова! ID:", id);
+            document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ...";
+
+            // Настраиваем слушатель звонка для этого нового пира
+            peer.on('call', (call) => {
+                console.log("📞 Соединение установлено!");
+                call.answer(localStream);
+                call.on('stream', (remoteStream) => {
+                    setupRemoteAudio(remoteStream);
+                    startCallTimer();
+                });
+                call.on('close', () => endCallLocal());
+                currentCall = call;
+            });
+
+            // 4. Обновляем базу: ПЕРЕДАЕМ НОВЫЙ ID (pickupId) ЗВОНЯЩЕМУ
+            await updateDoc(doc(db, "calls", activeCallDocId), { 
+                status: "answered",
+                pickupId: id // <--- Вот этот ID будет использовать ПК
+            });
+        });
+
         // Слушаем завершение
         const unsub = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
             if (snap.exists() && snap.data().status === "ended") {
@@ -1422,8 +1355,8 @@ document.getElementById('btn-answer-call').addEventListener('click', async () =>
         });
 
     } catch(e) {
-        console.error("Ошибка при ответе:", e);
-        alert("Не удалось ответить: " + e.message);
+        console.error(e);
+        alert("Ошибка: " + e.message);
         rejectCall();
     }
 });
