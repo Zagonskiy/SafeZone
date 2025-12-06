@@ -1126,39 +1126,78 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 // 1. Инициализация P2P
 function initPeer(uid) {
     if (peer) return;
-    // Используем UID как PeerID (очищаем от спецсимволов на всякий случай, хотя firebase uid обычно безопасны)
+    
+    // Конфигурация с Google STUN серверами
     peer = new Peer(uid, {
+        debug: 2, // Включаем логирование ошибок в консоль
         config: {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' }
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
             ]
         }
     }); 
     
     peer.on('open', (id) => {
-        console.log('My Peer ID is: ' + id);
+        console.log('✅ My Peer ID is: ' + id);
     });
 
+    // ОБРАБОТКА ВХОДЯЩЕГО ЗВОНКА (Receiver)
     peer.on('call', (call) => {
-        // PeerJS событие входящего потока (когда мы уже ответили)
-        navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-            localStream = stream;
-            call.answer(stream); // Отвечаем своим потоком
+        console.log("📞 Incoming P2P call detected!");
+
+        // ФУНКЦИЯ ОТВЕТА
+        const answerCall = (stream) => {
+            call.answer(stream); // Отвечаем имеющимся потоком
             
             call.on('stream', (remoteStream) => {
+                console.log("🔊 Remote stream received (Receiver side)");
                 setupRemoteAudio(remoteStream);
+                startCallTimer();
             });
+
+            call.on('close', () => endCallLocal());
+            call.on('error', (e) => console.error("Call Error:", e));
             
             currentCall = call;
-            startCallTimer();
-        });
+        };
+
+        // ПРОВЕРКА: Если микрофон уже включен кнопкой "Ответить", используем его
+        if (localStream) {
+            console.log("🎤 Using existing local stream");
+            answerCall(localStream);
+        } else {
+            // Если вдруг потока нет (редкий случай), запрашиваем
+            console.log("🎤 Requesting new stream");
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then((stream) => {
+                    localStream = stream;
+                    answerCall(stream);
+                })
+                .catch(err => {
+                    console.error("Mic Error:", err);
+                    alert("Ошибка доступа к микрофону");
+                });
+        }
     });
     
-    peer.on('error', (err) => console.error("PeerJS Error:", err));
+    peer.on('error', (err) => {
+        console.error("🚨 PeerJS Error:", err.type, err);
+        // Если ID занят или сеть недоступна
+        if (err.type === 'peer-unavailable') {
+            alert("Собеседник недоступен (P2P ошибка). Попробуйте сбросить и позвонить снова.");
+            endCallLocal();
+        }
+    });
+    
+    peer.on('disconnected', () => {
+        console.log("⚠️ Peer disconnected from server. Reconnecting...");
+        peer.reconnect();
+    });
 }
-
 // 2. Слушаем Firestore на предмет входящих вызовов
 function listenForIncomingCalls(myUid) {
     const q = query(
