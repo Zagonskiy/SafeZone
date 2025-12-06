@@ -88,6 +88,16 @@
                     <header class="top-bar chat-header">
                         <button id="back-btn" class="btn-small mobile-only"><</button>
                         <span id="chat-title">КАНАЛ: НЕ ВЫБРАН</span>
+                        <button id="btn-toggle-search" class="btn-small" style="margin-left: auto; display: none;">🔍</button>
+<div id="chat-search-bar" class="search-bar-overlay" style="display: none;">
+    <input type="text" id="chat-search-input" placeholder="Поиск сообщения..." autocomplete="off">
+    <div class="search-nav">
+        <span id="search-count">0/0</span>
+        <button id="btn-search-up">▲</button>
+        <button id="btn-search-down">▼</button>
+        <button id="btn-close-search">×</button>
+    </div>
+</div>
                     </header>
                     
                     <div id="messages-area" class="messages-container">
