@@ -416,3 +416,31 @@ audio::-webkit-media-controls-panel { background-color: transparent !important; 
     }
     .caption-text { font-size: 0.9rem; }
 }
+
+/* КНОПКА ПОЛНОГО ЭКРАНА */
+.fs-btn {
+    position: fixed; 
+    top: 25px;
+    left: 20px; /* Слева, чтобы не путать с крестиком */
+    
+    color: #fff;
+    font-size: 2.5rem; /* Крупный значок */
+    font-weight: bold;
+    line-height: 1;
+    
+    background: transparent;
+    border: none;
+    padding: 10px; /* Зона клика */
+    
+    cursor: pointer;
+    z-index: 40000; /* Самый верхний слой */
+    text-shadow: 0 0 10px rgba(0,0,0,0.8);
+    
+    display: none; /* Скрыта по умолчанию (покажем скриптом только для видео) */
+    transition: 0.2s;
+}
+
+.fs-btn:hover { 
+    color: var(--text-green); 
+    transform: scale(1.1);
+}
