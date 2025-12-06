@@ -190,7 +190,7 @@ const startRecording = async (e) => {
                     });
                     await updateDoc(doc(db, "chats", currentChatId), { 
                         lastUpdated: serverTimestamp(),
-                        hiddenFor: [] // Очищаем список скрытых, чтобы чат появился у всех участников
+                        hiddenFor: [] 
                     });
                 } catch (e) {
                     console.error(e);
@@ -567,39 +567,67 @@ function loadMyChats() {
     });
 }
 
+// --- ОТКРЫТИЕ ЧАТА (С УЧЕТОМ ОЧИСТКИ ИСТОРИИ) ---
 async function openChat(chatId, chatName) {
     currentChatId = chatId;
     currentChatPartnerAvatar = null;
+    let myClearedAt = null; // Переменная для времени очистки
+    
     document.getElementById('chat-title').innerText = `КАНАЛ: ${chatName}`;
     document.getElementById('msg-form').style.display = 'flex'; 
     document.getElementById('messages-area').innerHTML = ''; 
+    
     chatPanel.classList.add('open');
     if(searchInput) searchInput.blur(); 
 
     try {
         const chatSnap = await getDoc(doc(db, "chats", chatId));
         if (chatSnap.exists()) {
-            const part = chatSnap.data().participants;
-            const pId = part.find(uid => uid !== auth.currentUser.uid);
-            if (pId) {
-                const u = await getDoc(doc(db, "users", pId));
-                if (u.exists() && u.data().avatarBase64) currentChatPartnerAvatar = u.data().avatarBase64;
+            const data = chatSnap.data();
+            
+            // 1. Проверяем, когда я чистил этот чат
+            if (data.clearedAt && data.clearedAt[auth.currentUser.uid]) {
+                myClearedAt = data.clearedAt[auth.currentUser.uid];
+            }
+
+            // 2. Ищем аватарку собеседника
+            const partnerUid = data.participants.find(uid => uid !== auth.currentUser.uid);
+            if (partnerUid) {
+                const userSnap = await getDoc(doc(db, "users", partnerUid));
+                if (userSnap.exists() && userSnap.data().avatarBase64) {
+                    currentChatPartnerAvatar = userSnap.data().avatarBase64;
+                }
             }
         }
-    } catch (e) {}
+    } catch (e) { console.error(e); }
 
     if (unsubscribeMessages) unsubscribeMessages();
+    
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "asc"));
+    
     unsubscribeMessages = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
-        const area = document.getElementById('messages-area'); area.innerHTML = '';
-        snap.forEach((d) => {
-            const m = d.data();
-            if (m.senderId !== auth.currentUser.uid && !m.read && !d.metadata.hasPendingWrites) {
-                updateDoc(doc(db, "chats", chatId, "messages", d.id), { read: true });
+        const area = document.getElementById('messages-area');
+        area.innerHTML = ''; // Полная перерисовка (проще для фильтрации)
+        
+        snap.forEach((docSnap) => {
+            const msg = docSnap.data();
+            
+            // --- ФИЛЬТР ИСТОРИИ ---
+            // Если сообщение создано РАНЬШЕ, чем я очистил чат -> пропускаем его
+            if (myClearedAt && msg.createdAt && msg.createdAt.toMillis() <= myClearedAt.toMillis()) {
+                return;
             }
-            renderMessage(d);
+            // ----------------------
+
+            // Логика прочтения (как и была)
+            if (msg.senderId !== auth.currentUser.uid && !msg.read && !docSnap.metadata.hasPendingWrites) {
+                updateDoc(doc(db, "chats", chatId, "messages", docSnap.id), { read: true });
+            }
+            
+            renderMessage(docSnap);
         });
-        setTimeout(() => { area.scrollTop = area.scrollHeight; }, 10);
+        
+        setTimeout(() => { area.scrollTop = area.scrollHeight; }, 50);
     });
 }
 
@@ -614,7 +642,7 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
     });
     await updateDoc(doc(db, "chats", currentChatId), { 
         lastUpdated: serverTimestamp(),
-        hiddenFor: [] // Очищаем список скрытых, чтобы чат появился у всех участников
+        hiddenFor: arrayRemove(auth.currentUser.uid, currentUserData.uid) // Убираем из скрытых для ОБОИХ, чтобы чат всплыл
     });
     msgInput.value = '';
     // Возвращаем кнопку микрофона
@@ -662,7 +690,7 @@ btnConfirmPhoto.addEventListener('click', async () => {
         });
         await updateDoc(doc(db, "chats", currentChatId), { 
             lastUpdated: serverTimestamp(),
-            hiddenFor: [] // Очищаем список скрытых, чтобы чат появился у всех участников
+            hiddenFor: [] 
         });
         photoModal.classList.remove('active'); chatImgUpload.value=''; selectedFile = null;
     } catch(e) { alert("ОШИБКА"); } finally { btnConfirmPhoto.innerText = "ОТПРАВИТЬ"; btnConfirmPhoto.disabled = false; }
@@ -782,17 +810,38 @@ document.getElementById('btn-del-cancel').addEventListener('click', () => {
     chatToDeleteId = null;
 });
 
-// 2. ТОЛЬКО ДЛЯ МЕНЯ (Скрыть)
+// 2. ТОЛЬКО ДЛЯ МЕНЯ (Скрыть + Очистить историю)
 document.getElementById('btn-del-me').addEventListener('click', async () => {
     if (!chatToDeleteId) return;
+    
+    // Блокируем кнопку на секунду
+    const btn = document.getElementById('btn-del-me');
+    btn.disabled = true;
+    btn.innerText = "УДАЛЕНИЕ...";
+
     try {
-        // Добавляем мой ID в массив hiddenFor
+        // Добавляем ID в скрытые И ставим метку времени "Очищено"
         await updateDoc(doc(db, "chats", chatToDeleteId), {
-            hiddenFor: arrayUnion(auth.currentUser.uid)
+            hiddenFor: arrayUnion(auth.currentUser.uid),
+            [`clearedAt.${auth.currentUser.uid}`]: serverTimestamp()
         });
+        
+        // Закрываем окно (ГАРАНТИРОВАННО)
         deleteChatModal.classList.remove('active');
+        
+        // Если этот чат сейчас открыт — закрываем его визуально
+        if (currentChatId === chatToDeleteId) {
+            document.getElementById('back-btn').click();
+        }
+        
+        chatToDeleteId = null;
+
     } catch (e) {
+        console.error(e);
         alert("ОШИБКА: " + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerText = "ТОЛЬКО У МЕНЯ (СКРЫТЬ)";
     }
 });
 
