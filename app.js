@@ -659,30 +659,60 @@ function renderMessage(docSnap) {
         contentDiv.appendChild(audioWrapper);
 
     } else if (msg.type === 'video' && msg.isChunked) {
+        // --- ВИДЕО КАРТОЧКА ---
         const videoContainer = document.createElement('div');
         videoContainer.className = 'video-msg-container';
-        const thumbSrc = msg.videoThumbnail || DEFAULT_AVATAR; 
-        videoContainer.innerHTML = `<img src="${thumbSrc}" class="msg-video-thumb"><div class="play-icon-overlay"></div>`;
         
+        // Берем обложку или дефолтную картинку
+        const thumbSrc = msg.videoThumbnail || DEFAULT_AVATAR; 
+        
+        videoContainer.innerHTML = `
+            <img src="${thumbSrc}" class="msg-video-thumb">
+            <div class="play-icon-overlay"></div>`;
+        
+        // Обработчик клика на ВСЮ карточку
         videoContainer.onclick = async () => {
+            // Если видео уже скачано в этой сессии
             if (videoContainer.dataset.blobUrl) {
-                viewMedia('video', videoContainer.dataset.blobUrl, msg.text); return;
+                viewMedia('video', videoContainer.dataset.blobUrl, msg.text);
+                return;
             }
+
+            // Анимация загрузки (меняем иконку)
             const playIcon = videoContainer.querySelector('.play-icon-overlay');
+            const originalHtml = playIcon.innerHTML; // пусто
             playIcon.style.border = "2px dashed yellow";
+            playIcon.style.animation = "spin 1s infinite linear"; // Если бы был спиннер, но пока просто рамка
+
             try {
                 const videoBlob = await loadVideoFromChunks(docSnap.id, msg.mimeType);
                 if (videoBlob) {
                     const vidUrl = URL.createObjectURL(videoBlob);
-                    videoContainer.dataset.blobUrl = vidUrl; 
+                    videoContainer.dataset.blobUrl = vidUrl; // Кэшируем URL
+                    
+                    // Возвращаем стиль кнопки и открываем
+                    playIcon.style.border = "2px solid #fff";
+                    playIcon.style.animation = "none";
                     viewMedia('video', vidUrl, msg.text);
-                    playIcon.style.border = "2px solid var(--text-green)"; 
-                } else { alert("ОШИБКА ВИДЕО"); }
-            } catch (e) { alert("СБОЙ СЕТИ"); }
+                } else {
+                    alert("ОШИБКА: Файл поврежден");
+                    playIcon.style.borderColor = "red";
+                }
+            } catch (e) {
+                console.error(e);
+                alert("СБОЙ СЕТИ");
+                playIcon.style.borderColor = "red";
+            }
         };
+        
         contentDiv.appendChild(videoContainer);
+        
+        // Подпись под видео
         if(msg.text && msg.text !== "[ВИДЕО]") {
-            const caption = document.createElement('div'); caption.innerText = msg.text; caption.style.marginTop = "5px"; contentDiv.appendChild(caption);
+            const caption = document.createElement('div');
+            caption.innerText = msg.text; 
+            caption.style.marginTop = "5px";
+            contentDiv.appendChild(caption);
         }
 
     } else if (msg.imageBase64 || msg.type === 'image') {
