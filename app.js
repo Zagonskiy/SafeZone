@@ -1595,3 +1595,24 @@ async function logCallToChat(text) {
         await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
     } catch(e) { console.error("Log error", e); }
 }
+
+// --- ХАК ДЛЯ CHROME MOBILE (ВСТАВИТЬ В КОНЕЦ ФАЙЛА) ---
+document.body.addEventListener('touchstart', function() {
+    // Создаем и сразу запускаем пустой аудио-контекст при первом касании
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext) {
+        const ctx = new AudioContext();
+        ctx.resume().then(() => {
+            console.log("🔊 AudioContext разблокирован (Chrome Fix)");
+        });
+    }
+    // Пытаемся воспроизвести скрытый элемент, чтобы браузер разрешил звук
+    const audioEl = document.getElementById('remote-audio');
+    if(audioEl) {
+        audioEl.muted = true;
+        audioEl.play().then(() => {
+            audioEl.pause();
+            audioEl.muted = false;
+        }).catch(() => {});
+    }
+}, { once: true });
