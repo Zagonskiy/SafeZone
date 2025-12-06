@@ -631,19 +631,15 @@ function viewMedia(type, src, caption) {
     fullImageView.style.display = 'none';
     fullVideoView.style.display = 'none';
     
-    // Управление кнопкой полного экрана
-    if (fullscreenBtn) fullscreenBtn.style.display = 'none'; 
-
     if (type === 'video') {
         fullVideoView.style.display = 'block';
         fullVideoView.src = src;
-        
-        // Показываем кнопку полного экрана только для видео
-        if (fullscreenBtn) fullscreenBtn.style.display = 'block';
-        
+        // Пробуем автоплей
         fullVideoView.play().catch(() => {}); 
     } else {
+        // Останавливаем видео, если оно было
         try { fullVideoView.pause(); } catch(e){}
+        
         fullImageView.style.display = 'block';
         fullImageView.src = src;
     }
