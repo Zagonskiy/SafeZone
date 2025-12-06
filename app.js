@@ -1251,17 +1251,36 @@ async function startVoiceCall(receiverId) {
         
         if (data.status === "answered") {
             document.getElementById('call-status-text').innerText = "ПОДКЛЮЧЕНИЕ P2P...";
-            // Инициируем PeerJS звонок
-            const call = peer.call(receiverId, localStream);
             
-            call.on('stream', (remoteStream) => {
-                setupRemoteAudio(remoteStream);
-                startCallTimer();
-            });
-            call.on('close', () => endCallLocal());
-            call.on('error', () => endCallLocal());
-            currentCall = call;
-        } 
+            console.log("⚡ Статус ANSWERED получен. Ждем готовности собеседника...");
+
+            // ВАЖНО: Даем 1 секунду собеседнику, чтобы его PeerJS точно был готов
+            setTimeout(() => {
+                console.log("📞 Пытаюсь соединиться с ID:", receiverId);
+                
+                const call = peer.call(receiverId, localStream);
+                
+                if (!call) {
+                    console.error("❌ Не удалось начать звонок. Возможно, PeerID неверен или собеседник оффлайн.");
+                    alert("Ошибка соединения: Собеседник не найден в сети P2P");
+                    return;
+                }
+
+                call.on('stream', (remoteStream) => {
+                    console.log("✅ Удаленный поток получен!");
+                    setupRemoteAudio(remoteStream);
+                    startCallTimer();
+                });
+                
+                call.on('close', () => endCallLocal());
+                call.on('error', (e) => {
+                    console.error("Ошибка внутри звонка:", e);
+                    endCallLocal();
+                });
+                
+                currentCall = call;
+            }, 1000); // Задержка 1000 мс (1 секунда)
+        }
         else if (data.status === "rejected") {
             document.getElementById('call-status-text').innerText = "ОТКЛОНЕНО";
             logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
