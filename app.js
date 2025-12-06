@@ -39,16 +39,6 @@ let isRecording = false;
 let isLockedMode = false;
 let detectedMimeType = '';
 
-// --- ЗВОНКИ ---
-let peer = null;
-let currentCall = null;
-let localStream = null;
-let incomingCallData = null; // Данные из Firestore о входящем
-let activeCallDocId = null; // ID документа звонка в Firestore
-let callTimerInterval = null;
-let callSeconds = 0;
-let isMicMuted = false;
-
 // Дефолт аватар
 const DEFAULT_AVATAR = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2333ff33' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='100%25' height='100%25' fill='%23111'/%3E%3Cpath d='M12 2C9 2 7 3.5 7 6v1c0 .5-.5 1-1 1s-1 .5-1 1v2c0 1.5 1 2.5 3 3'/%3E%3Cpath d='M12 2c3 0 5 1.5 5 4v1c0 .5.5 1 1 1s1 .5 1 1v2c0 1.5-1 2.5-3 3'/%3E%3Cpath d='M16 11c0 2.5-1.5 4-4 4s-4-1.5-4-4'/%3E%3Cpath d='M4 22v-2c0-2.5 2-4 4-5'/%3E%3Cpath d='M20 22v-2c0-2.5-2-4-4-5'/%3E%3Cpath d='M8 4h8'/%3E%3C/svg%3E";
 
@@ -1120,57 +1110,197 @@ if(btnSearchUp) btnSearchUp.addEventListener('click', () => navigateSearch(-1));
 if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1)); // Вниз
 
 // ==========================================
-// === СИСТЕМА ЗВОНКОВ (WEBRTC + FIRESTORE) ===
+// === НОВАЯ СИСТЕМА ЗВОНКОВ (STABLE) ===
 // ==========================================
 
-// 1. Инициализация P2P (Базовая версия)
-function initPeer(uid) {
-    // Если пир уже есть и жив — не трогаем
-    if (peer && !peer.destroyed) return;
-    
-    console.log("🚀 Initializing PeerJS...");
+let localStream = null;
+let currentCall = null;
+let peer = null;
+let activeCallDocId = null;
+let incomingCallData = null;
+let callTimerInterval = null;
+let callSeconds = 0;
+let isMicMuted = false;
+let callUnsubscribe = null; // Для отписки от слушателя Firestore
 
+// 1. Утилита: Разблокировка Аудио (КРИТИЧНО ДЛЯ IOS)
+// Эту функцию надо вызывать ПРЯМО ВНУТРИ обработчика клика (Ответить/Позвонить)
+function unlockAudioEngine() {
+    const audioEl = document.getElementById('remote-audio');
+    
+    // 1. Будим AudioContext
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext) {
+        const ctx = new AudioContext();
+        if (ctx.state === 'suspended') {
+            ctx.resume();
+        }
+    }
+
+    // 2. Проигрываем тишину через тег <audio>, чтобы браузер разрешил звук
+    if (audioEl) {
+        audioEl.srcObject = null;
+        audioEl.muted = true; // Сначала мьют
+        audioEl.play().then(() => {
+            audioEl.muted = false; // Потом включаем звук (но потока еще нет)
+            console.log("🔊 Audio Engine Unlocked");
+        }).catch(e => console.log("Audio unlock warning:", e));
+    }
+}
+
+// 2. Инициализация PeerJS (Вызывается при входе)
+function initPeer(uid) {
+    if (peer && !peer.destroyed) return;
+
+    // Используем UID как PeerID для простоты соединения
     peer = new Peer(uid, {
         debug: 1,
         config: {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
+                { urls: 'stun:stun1.l.google.com:19302' },
+                // Если есть возможность, добавьте сюда TURN сервер для работы через 4G
             ]
         }
-    }); 
-    
-    peer.on('open', (id) => {
-        console.log('✅ PeerJS Ready. ID:', id);
     });
 
-    // Обработка входящих звонков
-    peer.on('call', (call) => {
-        console.log("📞 Incoming call!");
-        const answerLogic = (stream) => {
-            call.answer(stream);
-            call.on('stream', (remoteStream) => {
-                setupRemoteAudio(remoteStream);
-                startCallTimer();
-            });
-            call.on('close', () => endCallLocal());
-            currentCall = call;
-        };
+    peer.on('open', (id) => {
+        console.log('✅ PeerJS Online. ID:', id);
+    });
 
-        if (localStream) answerLogic(localStream);
+    peer.on('error', (err) => {
+        console.error("Peer Error:", err.type);
+        // Если ID занят (открыто 2 вкладки), просто игнорируем, звонок придет на одну из них
+    });
+
+    // Обработка ВХОДЯЩЕГО прямого P2P соединения (когда уже подняли трубку)
+    peer.on('call', (call) => {
+        console.log("⚡ Получен P2P сигнал");
+        
+        // Если у нас уже есть локальный стрим (мы нажали "Ответить"), отдаем его
+        if (localStream) {
+            call.answer(localStream);
+            handleCallStream(call);
+        } 
+        // Если стрима нет (странная ситуация), пытаемся получить
         else {
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then((s) => {
-                    localStream = s;
-                    answerLogic(s);
-                })
-                .catch(e => console.error(e));
+            getMediaStream().then(stream => {
+                localStream = stream;
+                call.answer(stream);
+                handleCallStream(call);
+            });
         }
     });
-    
-    peer.on('error', (err) => console.error("Peer Error:", err.type));
 }
-// 2. Слушаем Firestore на предмет входящих вызовов
+
+// 3. Получение доступа к микрофону (с настройками качества)
+async function getMediaStream() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            },
+            video: false
+        });
+        return stream;
+    } catch (err) {
+        console.error("Mic Error:", err);
+        alert("ОШИБКА: Нет доступа к микрофону. Проверьте настройки браузера.");
+        throw err;
+    }
+}
+
+// 4. Логика приема потока (общая для обоих)
+function handleCallStream(call) {
+    currentCall = call;
+    
+    call.on('stream', (remoteStream) => {
+        console.log("🎧 Получен аудио поток собеседника");
+        const audioEl = document.getElementById('remote-audio');
+        
+        if (audioEl) {
+            audioEl.srcObject = remoteStream;
+            
+            // Попытка воспроизведения
+            const playPromise = audioEl.play();
+            if (playPromise !== undefined) {
+                playPromise
+                    .then(() => {
+                        document.getElementById('call-status-text').innerText = "В ЭФИРЕ";
+                        document.getElementById('call-status-text').style.color = "#33ff33";
+                    })
+                    .catch(error => {
+                        console.error("Playback failed:", error);
+                        document.getElementById('call-status-text').innerText = "ЖМИТЕ ЭКРАН!";
+                    });
+            }
+        }
+        startCallTimer();
+    });
+
+    call.on('close', () => endCallLocal());
+    call.on('error', () => endCallLocal());
+}
+
+// 5. ИСХОДЯЩИЙ ЗВОНОК
+if (btnCall) {
+    btnCall.addEventListener('click', async () => {
+        if (!currentChatId) return;
+
+        // 1. Разблокируем аудио сразу по клику
+        unlockAudioEngine();
+
+        // 2. Получаем ID собеседника
+        const chatDoc = await getDoc(doc(db, "chats", currentChatId));
+        const receiverId = chatDoc.data().participants.find(id => id !== auth.currentUser.uid);
+        if (!receiverId) return;
+
+        // 3. Запускаем интерфейс и микрофон
+        try {
+            localStream = await getMediaStream();
+        } catch(e) { return; } // Ошибка уже показана в getMediaStream
+
+        showActiveCallScreen(currentUserData.nickname, "ОЖИДАНИЕ...");
+        
+        // Показываем имя кому звоним
+        getDoc(doc(db, "users", receiverId)).then(s => {
+            if(s.exists()) document.getElementById('call-partner-name').innerText = s.data().nickname;
+        });
+
+        // 4. Создаем документ вызова в Firestore
+        const callDocRef = await addDoc(collection(db, "calls"), {
+            callerId: auth.currentUser.uid,
+            callerName: currentUserData.nickname,
+            callerAvatar: currentUserData.avatarBase64 || null,
+            receiverId: receiverId,
+            status: "offering", // Предложение
+            timestamp: serverTimestamp()
+        });
+        activeCallDocId = callDocRef.id;
+
+        // 5. Слушаем ответ
+        callUnsubscribe = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
+            if (!snap.exists()) return;
+            const data = snap.data();
+
+            if (data.status === "answered") {
+                document.getElementById('call-status-text').innerText = "СОЕДИНЕНИЕ...";
+                // Собеседник ответил! Инициируем P2P соединение на его ID
+                // (PeerID собеседника обычно равен его receiverId)
+                if (!currentCall) {
+                    const call = peer.call(receiverId, localStream);
+                    handleCallStream(call);
+                }
+            } else if (data.status === "rejected" || data.status === "ended") {
+                endCallLocal();
+            }
+        });
+    });
+}
+
+// 6. СЛУШАТЕЛЬ ВХОДЯЩИХ (Firestore)
 function listenForIncomingCalls(myUid) {
     const q = query(
         collection(db, "calls"), 
@@ -1182,9 +1312,8 @@ function listenForIncomingCalls(myUid) {
         snap.docChanges().forEach((change) => {
             if (change.type === "added") {
                 const data = change.doc.data();
-                // Проверяем, не старый ли это звонок (больше 30 сек)
-                const now = Date.now();
-                if (data.timestamp && (now - data.timestamp.toMillis()) > 45000) return;
+                // Игнорируем старые звонки (старше 1 минуты)
+                if (data.timestamp && (Date.now() - data.timestamp.toMillis() > 60000)) return;
                 
                 showIncomingCallModal(change.doc.id, data);
             }
@@ -1192,287 +1321,110 @@ function listenForIncomingCalls(myUid) {
     });
 }
 
-// 3. UI: Показать входящий
 function showIncomingCallModal(docId, data) {
-    if (currentCall || activeCallDocId) return; // Уже занят
-    
-    incomingCallData = { id: docId, ...data };
+    if (activeCallDocId) return; // Уже занят
+    incomingCallData = data;
     activeCallDocId = docId;
     
-    document.getElementById('incoming-call-modal').classList.add('active');
+    const modal = document.getElementById('incoming-call-modal');
+    modal.classList.add('active');
     document.getElementById('incoming-caller-name').innerText = data.callerName;
-    document.getElementById('incoming-call-avatar').src = data.callerAvatar || DEFAULT_AVATAR;
-    
-    // Играть звук рингтона (опционально, если есть файл)
+    const av = document.getElementById('incoming-call-avatar');
+    av.src = data.callerAvatar || DEFAULT_AVATAR;
+
+    // Вибрация (если поддерживается Android)
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
 }
 
-// 4. Начало звонка (исходящий)
-
-// В openChat добавьте: if(btnCall) btnCall.style.display = 'flex';
-// В back-btn listener добавьте: if(btnCall) btnCall.style.display = 'none';
-
-if (btnCall) {
-    btnCall.addEventListener('click', async () => {
-        if (!currentChatId || !auth.currentUser) return;
-        
-        // Получаем ID собеседника
-        const chatDoc = await getDoc(doc(db, "chats", currentChatId));
-        if (!chatDoc.exists()) return;
-        
-        const participants = chatDoc.data().participants;
-        const receiverId = participants.find(id => id !== auth.currentUser.uid);
-        if (!receiverId) return;
-
-        startVoiceCall(receiverId);
-    });
-}
-
-async function startVoiceCall(receiverId) {
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch(e) {
-        alert("ОШИБКА МИКРОФОНА: " + e.message);
-        return;
-    }
-
-    showActiveCallScreen(currentUserData.nickname, "ПОИСК АБОНЕНТА..."); 
-    
-    getDoc(doc(db, "users", receiverId)).then(s => {
-        if(s.exists()) document.getElementById('call-partner-name').innerText = s.data().nickname;
-    });
-
-    const callDocRef = await addDoc(collection(db, "calls"), {
-        callerId: auth.currentUser.uid,
-        callerName: currentUserData.nickname,
-        callerAvatar: currentUserData.avatarBase64,
-        receiverId: receiverId,
-        chatId: currentChatId,
-        status: "offering",
-        timestamp: serverTimestamp()
-    });
-    
-    activeCallDocId = callDocRef.id;
-
-    const unsub = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
-        if (!snap.exists()) return;
-        const data = snap.data();
-        
-        // Внутри onSnapshot...
-        if (data.status === "answered") {
-            if (currentCall) return;
-
-            document.getElementById('call-status-text').innerText = "СОЕДИНЕНИЕ...";
-            
-            // --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Берем специальный ID из базы, если он есть ---
-            const targetPeerId = data.pickupId || receiverId; 
-            console.log(`⚡ Звоню на точный ID: ${targetPeerId}`);
-
-            // Даем телефону 1 сек на подготовку (на всякий случай)
-            setTimeout(() => {
-                const call = peer.call(targetPeerId, localStream);
-
-                if (!call) {
-                    console.error("Сбой вызова PeerJS");
-                    return;
-                }
-
-                call.on('stream', (remoteStream) => {
-                    console.log("✅ Поток получен!");
-                    setupRemoteAudio(remoteStream);
-                    startCallTimer();
-                });
-
-                call.on('close', () => endCallLocal());
-                call.on('error', (e) => console.error("Call error:", e));
-                
-                currentCall = call;
-            }, 1000);
-        } 
-        else if (data.status === "rejected") {
-            logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
-            endCallLocal();
-        }
-        else if (data.status === "ended") {
-             endCallLocal();
-        }
-    });
-}
-// 5. Ответ на звонок (С ГЕНЕРАЦИЕЙ НОВОГО ID)
+// 7. ОТВЕТ НА ЗВОНОК
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
     document.getElementById('incoming-call-modal').classList.remove('active');
     
-    // 1. Разблокировка аудио
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    // 1. КРИТИЧНО: Разблокируем аудио движок по клику
+    unlockAudioEngine();
 
     try {
-        showActiveCallScreen(incomingCallData.callerName, "СОЗДАНИЕ КАНАЛА...");
+        // 2. Включаем микрофон
+        localStream = await getMediaStream();
         
-        // 2. Получаем микрофон
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
-        // 3. УБИВАЕМ СТАРЫЙ PEER И СОЗДАЕМ НОВЫЙ С УНИКАЛЬНЫМ ID
-        if (peer) peer.destroy();
-        
-        // Генерируем уникальный суффикс, чтобы сервер PeerJS точно принял нас
-        const sessionPeerId = auth.currentUser.uid + '-' + Date.now();
-        console.log("🆕 Создаю свежий PeerID для звонка:", sessionPeerId);
+        showActiveCallScreen(incomingCallData.callerName, "ПОДКЛЮЧЕНИЕ...");
 
-        peer = new Peer(sessionPeerId, {
-            config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+        // 3. Обновляем статус в Firestore -> Caller увидит это и начнет P2P соединение
+        await updateDoc(doc(db, "calls", activeCallDocId), { 
+            status: "answered"
         });
 
-        // Ждем, пока новый ID зарегистрируется на сервере
-        peer.on('open', async (id) => {
-            console.log("✅ Сеть готова! ID:", id);
-            document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ...";
-
-            // Настраиваем слушатель звонка для этого нового пира
-            peer.on('call', (call) => {
-                console.log("📞 Соединение установлено!");
-                call.answer(localStream);
-                call.on('stream', (remoteStream) => {
-                    setupRemoteAudio(remoteStream);
-                    startCallTimer();
-                });
-                call.on('close', () => endCallLocal());
-                currentCall = call;
-            });
-
-            // 4. Обновляем базу: ПЕРЕДАЕМ НОВЫЙ ID (pickupId) ЗВОНЯЩЕМУ
-            await updateDoc(doc(db, "calls", activeCallDocId), { 
-                status: "answered",
-                pickupId: id // <--- Вот этот ID будет использовать ПК
-            });
-        });
-
-        // Слушаем завершение
-        const unsub = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
-            if (snap.exists() && snap.data().status === "ended") {
-                unsub();
+        // 4. Подписываемся на удаление звонка (если тот сбросит)
+        callUnsubscribe = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
+            if (!snap.exists() || snap.data().status === "ended") {
                 endCallLocal();
             }
         });
 
-    } catch(e) {
-        console.error(e);
-        alert("Ошибка: " + e.message);
+    } catch (e) {
         rejectCall();
     }
 });
-// 6. Отклонение
+
+// 8. ОТКЛОНЕНИЕ
 document.getElementById('btn-decline-call').addEventListener('click', rejectCall);
 
 async function rejectCall() {
     document.getElementById('incoming-call-modal').classList.remove('active');
     if (activeCallDocId) {
-        await updateDoc(doc(db, "calls", activeCallDocId), { status: "rejected" });
-        activeCallDocId = null;
-        incomingCallData = null;
+        try {
+            await updateDoc(doc(db, "calls", activeCallDocId), { status: "rejected" });
+        } catch(e) {}
     }
+    activeCallDocId = null;
+    incomingCallData = null;
 }
 
-// 7. Сброс / Завершение (Красная кнопка)
+// 9. ЗАВЕРШЕНИЕ (HANGUP)
 document.getElementById('btn-hangup').addEventListener('click', async () => {
     if (activeCallDocId) {
-        // Логируем в чат перед выходом, если мы были в разговоре
-        if (callSeconds > 0) {
-            logCallToChat(`📞 ЗВОНОК ЗАВЕРШЕН (${formatTime(callSeconds)})`);
-        } else if (document.getElementById('call-status-text').innerText === "СОЕДИНЕНИЕ...") {
-            logCallToChat("↩ ЗВОНОК ОТМЕНЕН");
-        }
-
-        // Ставим статус ended, чтобы собеседник отключился
-        await updateDoc(doc(db, "calls", activeCallDocId), { status: "ended" });
+        try {
+            await updateDoc(doc(db, "calls", activeCallDocId), { status: "ended" });
+        } catch(e) {}
     }
     endCallLocal();
 });
 
-// Общая функция очистки
 function endCallLocal() {
+    // UI
     document.getElementById('active-call-screen').classList.remove('active');
     document.getElementById('incoming-call-modal').classList.remove('active');
-    
+
+    // Очистка P2P
     if (currentCall) {
         currentCall.close();
         currentCall = null;
     }
+    
+    // Очистка потоков (Микрофон) - ВАЖНО, чтобы значок записи пропал
     if (localStream) {
         localStream.getTracks().forEach(track => track.stop());
         localStream = null;
     }
-    
-    const remoteAudio = document.getElementById('remote-audio');
-    if (remoteAudio) remoteAudio.srcObject = null;
-    
+
+    // Очистка удаленного аудио
+    const audioEl = document.getElementById('remote-audio');
+    if (audioEl) {
+        audioEl.pause();
+        audioEl.srcObject = null;
+    }
+
+    // Таймеры и переменные
     stopCallTimer();
+    if (callUnsubscribe) callUnsubscribe();
+    callUnsubscribe = null;
     activeCallDocId = null;
     incomingCallData = null;
     isMicMuted = false;
     updateMicIcon();
 }
 
-// 8. Управление аудио и таймер
-function setupRemoteAudio(stream) {
-    console.log("🎧 Настройка аудио потока...");
-    const audioEl = document.getElementById('remote-audio');
-    
-    // Сброс srcObject для надежности
-    audioEl.srcObject = null;
-    audioEl.srcObject = stream;
-    
-    // Явно задаем громкость
-    audioEl.volume = 1.0;
-
-    // Пытаемся воспроизвести
-    const playPromise = audioEl.play();
-
-    if (playPromise !== undefined) {
-        playPromise.then(() => {
-            console.log("🔊 Аудио воспроизводится!");
-            document.getElementById('call-status-text').innerText = "ЗВУК ЕСТЬ";
-            document.getElementById('call-status-text').style.color = "#33ff33";
-        }).catch(error => {
-            console.warn("🔇 Автоплей заблокирован браузером. Ждем клика.", error);
-            document.getElementById('call-status-text').innerText = "НАЖМИТЕ НА ЭКРАН";
-            document.getElementById('call-status-text').style.color = "yellow";
-            
-            // Хак: Включаем звук при любом клике по экрану
-            const enableAudio = () => {
-                audioEl.play();
-                document.getElementById('call-status-text').innerText = "В ЭФИРЕ";
-                document.getElementById('call-status-text').style.color = "#33ff33";
-                document.removeEventListener('click', enableAudio);
-                document.removeEventListener('touchstart', enableAudio);
-            };
-            
-            document.addEventListener('click', enableAudio);
-            document.addEventListener('touchstart', enableAudio);
-        });
-    }
-}
-
-document.getElementById('btn-mic-toggle').addEventListener('click', () => {
-    if (!localStream) return;
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (audioTrack) {
-        isMicMuted = !isMicMuted;
-        audioTrack.enabled = !isMicMuted;
-        updateMicIcon();
-    }
-});
-
-function updateMicIcon() {
-    const btn = document.getElementById('btn-mic-toggle');
-    if (isMicMuted) {
-        btn.classList.add('muted');
-        btn.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
-    } else {
-        btn.classList.remove('muted');
-        btn.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
-    }
-}
-
+// 10. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ИНТЕРФЕЙСА
 function showActiveCallScreen(name, status) {
     document.getElementById('active-call-screen').classList.add('active');
     document.getElementById('call-partner-name').innerText = name;
@@ -1501,93 +1453,24 @@ function formatTime(secs) {
     return `${m}:${s}`;
 }
 
-// 9. Логирование в чат
-async function logCallToChat(text) {
-    if (!currentChatId || !auth.currentUser) return;
-    try {
-        await addDoc(collection(db, "chats", currentChatId, "messages"), {
-            text: text, 
-            senderId: auth.currentUser.uid, 
-            senderNick: currentUserData.nickname,
-            senderAvatar: currentUserData.avatarBase64 || null, 
-            createdAt: serverTimestamp(), 
-            edited: false,
-            read: false,
-            type: 'system' // Специальный тип, можно стилизовать отдельно
-        });
-        await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
-    } catch(e) { console.error("Log error", e); }
-}
-
-// --- ХАК ДЛЯ CHROME MOBILE (ВСТАВИТЬ В КОНЕЦ ФАЙЛА) ---
-document.body.addEventListener('touchstart', function() {
-    // Создаем и сразу запускаем пустой аудио-контекст при первом касании
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (AudioContext) {
-        const ctx = new AudioContext();
-        ctx.resume().then(() => {
-            console.log("🔊 AudioContext разблокирован (Chrome Fix)");
-        });
+document.getElementById('btn-mic-toggle').addEventListener('click', () => {
+    if (!localStream) return;
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack) {
+        isMicMuted = !isMicMuted;
+        audioTrack.enabled = !isMicMuted;
+        updateMicIcon();
     }
-    // Пытаемся воспроизвести скрытый элемент, чтобы браузер разрешил звук
-    const audioEl = document.getElementById('remote-audio');
-    if(audioEl) {
-        audioEl.muted = true;
-        audioEl.play().then(() => {
-            audioEl.pause();
-            audioEl.muted = false;
-        }).catch(() => {});
+});
+
+function updateMicIcon() {
+    const btn = document.getElementById('btn-mic-toggle');
+    // SVG иконки остаются теми же, что и были
+    if (isMicMuted) {
+        btn.classList.add('muted');
+        btn.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path></svg>`;
+    } else {
+        btn.classList.remove('muted');
+        btn.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
     }
-}, { once: true });
-
-// Вспомогательная функция: Гарантирует живое соединение (HARD RESET)
-function ensurePeerConnected() {
-    return new Promise((resolve, reject) => {
-        console.log("🛠️ Проверка состояния PeerJS...");
-
-        // Функция проверки успеха
-        const waitForOpen = () => {
-            return new Promise((res, rej) => {
-                let attempts = 0;
-                const check = setInterval(() => {
-                    attempts++;
-                    // Если пир жив, не отключен и имеет ID
-                    if (peer && !peer.destroyed && !peer.disconnected && peer.id) {
-                        clearInterval(check);
-                        console.log("✅ PeerJS готов к работе! ID:", peer.id);
-                        res();
-                    }
-                    if (attempts > 30) { // 6 секунд максимум
-                        clearInterval(check);
-                        rej("PeerJS не смог соединиться с сервером");
-                    }
-                }, 200);
-            });
-        };
-
-        // Если пир выглядит живым - проверим пинг (легкий путь)
-        if (peer && !peer.destroyed && !peer.disconnected) {
-            resolve();
-            return;
-        }
-
-        // ТЯЖЕЛЫЙ ПУТЬ: Уничтожаем и создаем заново
-        console.warn("⚠️ PeerJS неактивен. Выполняю ПОЛНЫЙ ПЕРЕЗАПУСК...");
-        
-        if (peer) peer.destroy();
-        peer = null;
-
-        // Запускаем инициализацию (она создаст new Peer)
-        initPeer(auth.currentUser.uid);
-
-        // Ждем пока он поднимется
-        waitForOpen()
-            .then(resolve)
-            .catch(err => {
-                console.error(err);
-                // Последний шанс: еще раз
-                initPeer(auth.currentUser.uid);
-                setTimeout(resolve, 2000); // Просто ждем и надеемся
-            });
-    });
 }
