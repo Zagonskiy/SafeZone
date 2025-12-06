@@ -1123,12 +1123,11 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 // === СИСТЕМА ЗВОНКОВ (WEBRTC + FIRESTORE) ===
 // ==========================================
 
-// 1. Инициализация P2P (Базовая версия)
+// 1. Инициализация P2P (Фоновая работа)
 function initPeer(uid) {
-    // Если пир уже есть и жив — не трогаем
     if (peer && !peer.destroyed) return;
     
-    console.log("🚀 Initializing PeerJS...");
+    console.log("🚀 Initializing Standby Peer:", uid);
 
     peer = new Peer(uid, {
         debug: 1,
@@ -1141,34 +1140,38 @@ function initPeer(uid) {
     }); 
     
     peer.on('open', (id) => {
-        console.log('✅ PeerJS Ready. ID:', id);
+        console.log('✅ Standby Peer Ready:', id);
     });
 
-    // Обработка входящих звонков
+    // Этот блок сработает, только если кто-то позвонит напрямую по UID (редкий случай теперь)
     peer.on('call', (call) => {
-        console.log("📞 Incoming call!");
-        const answerLogic = (stream) => {
-            call.answer(stream);
-            call.on('stream', (remoteStream) => {
-                setupRemoteAudio(remoteStream);
-                startCallTimer();
-            });
-            call.on('close', () => endCallLocal());
-            currentCall = call;
-        };
-
-        if (localStream) answerLogic(localStream);
-        else {
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then((s) => {
-                    localStream = s;
-                    answerLogic(s);
-                })
-                .catch(e => console.error(e));
-        }
+        // Отклоняем "случайные" прямые звонки, если мы не в режиме ответа
+        // или можно добавить логику авто-отбоя, если занято
+        console.log("⚠️ Входящий на основной ID (игнорируем или обрабатываем)");
     });
     
-    peer.on('error', (err) => console.error("Peer Error:", err.type));
+    peer.on('error', (err) => {
+        console.warn("⚠️ Peer Background Error:", err.type);
+        // Если сеть упала, пробуем реконнект через паузу
+        if (err.type === 'network' || err.type === 'disconnected') {
+            setTimeout(() => {
+                if (peer && !peer.destroyed) peer.reconnect();
+            }, 2000);
+        }
+    });
+
+    // Восстановление при разрыве сокета
+    peer.on('disconnected', () => {
+        if (peer && !peer.destroyed) peer.reconnect();
+    });
+    
+    // Heartbeat
+    if (window.peerKeepAlive) clearInterval(window.peerKeepAlive);
+    window.peerKeepAlive = setInterval(() => {
+        if (peer && !peer.destroyed && peer.disconnected) {
+            peer.reconnect();
+        }
+    }, 5000);
 }
 // 2. Слушаем Firestore на предмет входящих вызовов
 function listenForIncomingCalls(myUid) {
@@ -1319,55 +1322,53 @@ async function startVoiceCall(receiverId) {
         }
     });
 }
-// 5. Ответ на звонок (ИСПРАВЛЕНО: Добавлены STUN серверы)
+// 5. УНИВЕРСАЛЬНЫЙ ОТВЕТ НА ЗВОНОК (ПК И ТЕЛЕФОН)
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
     document.getElementById('incoming-call-modal').classList.remove('active');
     
-    // 1. Разблокировка аудио
+    // "Прогрев" аудио (для iOS/Android)
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
 
     try {
-        showActiveCallScreen(incomingCallData.callerName, "НАСТРОЙКА КАНАЛА...");
+        showActiveCallScreen(incomingCallData.callerName, "СОЗДАНИЕ КАНАЛА...");
         
-        // 2. Получаем микрофон
+        // Получаем микрофон
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         
-        // 3. УБИВАЕМ СТАРЫЙ PEER И СОЗДАЕМ НОВЫЙ
-        // Старый мог "уснуть", нам нужен свежий
+        // --- ГЛАВНОЕ: Убиваем текущий Peer и создаем временный для этого звонка ---
         if (peer) peer.destroy();
         
-        const sessionPeerId = auth.currentUser.uid + '-' + Date.now();
-        console.log("🆕 Создаю свежий PeerID:", sessionPeerId);
+        // Создаем уникальный ID для этой сессии
+        const pickupId = auth.currentUser.uid + '_pickup_' + Date.now();
+        console.log("🆕 Создаю Peer для ответа:", pickupId);
 
-        // ВАЖНО: Добавляем сюда ВЕСЬ список STUN серверов, иначе 4G не пропустит звонок
-        peer = new Peer(sessionPeerId, {
-            debug: 2,
+        peer = new Peer(pickupId, {
+            debug: 1,
             config: {
                 iceServers: [
                     { urls: 'stun:stun.l.google.com:19302' },
                     { urls: 'stun:stun1.l.google.com:19302' },
                     { urls: 'stun:stun2.l.google.com:19302' },
-                    { urls: 'stun:stun3.l.google.com:19302' },
-                    { urls: 'stun:stun4.l.google.com:19302' }
+                    { urls: 'stun:stun3.l.google.com:19302' }
                 ]
             }
         });
 
-        // Ждем регистрации на сервере
+        // Как только временный ID готов, записываем его в базу
         peer.on('open', async (id) => {
-            console.log("✅ Мобильный Peer готов! ID:", id);
-            document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ СИГНАЛА...";
+            console.log("✅ Канал ответа готов:", id);
+            document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ...";
 
-            // Готовимся принимать звонок
+            // Ждем входящего подключения от звонящего
             peer.on('call', (call) => {
-                console.log("📞 Сигнал получен! Соединяем...");
+                console.log("🔗 Соединение поймано!");
                 document.getElementById('call-status-text').innerText = "СОЕДИНЕНИЕ...";
                 
                 call.answer(localStream);
                 
                 call.on('stream', (remoteStream) => {
-                    console.log("🔊 Звук пошел!");
+                    console.log("🔊 Звук получен!");
                     setupRemoteAudio(remoteStream);
                     startCallTimer();
                 });
@@ -1378,7 +1379,7 @@ document.getElementById('btn-answer-call').addEventListener('click', async () =>
                 currentCall = call;
             });
 
-            // 4. Отправляем свой новый ID звонящему через базу
+            // Обновляем базу: "Я ответил, звони сюда -> pickupId"
             await updateDoc(doc(db, "calls", activeCallDocId), { 
                 status: "answered",
                 pickupId: id 
@@ -1386,11 +1387,15 @@ document.getElementById('btn-answer-call').addEventListener('click', async () =>
         });
 
         peer.on('error', (err) => {
-            console.error("Peer Error on Mobile:", err);
-            alert("Ошибка связи P2P: " + err.type);
+            console.error("Peer Error on Answer:", err);
+            // Если критическая ошибка, пытаемся восстановить initPeer
+            if (err.type === 'network' || err.type === 'disconnected') {
+                alert("Сбой сети при ответе. Перезвоните.");
+                endCallLocal();
+            }
         });
 
-        // Слушаем завершение (если положили трубку на той стороне)
+        // Слушаем завершение звонка через базу
         const unsub = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
             if (snap.exists() && snap.data().status === "ended") {
                 unsub();
@@ -1400,7 +1405,7 @@ document.getElementById('btn-answer-call').addEventListener('click', async () =>
 
     } catch(e) {
         console.error(e);
-        alert("Ошибка: " + e.message);
+        alert("Ошибка при ответе: " + e.message);
         rejectCall();
     }
 });
@@ -1434,9 +1439,12 @@ document.getElementById('btn-hangup').addEventListener('click', async () => {
 
 // Общая функция очистки
 function endCallLocal() {
+    console.log("📴 Завершение звонка...");
+    
     document.getElementById('active-call-screen').classList.remove('active');
     document.getElementById('incoming-call-modal').classList.remove('active');
     
+    // Закрываем медиа-потоки
     if (currentCall) {
         currentCall.close();
         currentCall = null;
@@ -1454,8 +1462,18 @@ function endCallLocal() {
     incomingCallData = null;
     isMicMuted = false;
     updateMicIcon();
-}
 
+    // ВАЖНО: Если мы использовали временный ID для звонка - уничтожаем его
+    // и возвращаем основной ID для ожидания следующих вызовов
+    if (peer) {
+        peer.destroy();
+        peer = null;
+    }
+    // Восстанавливаем дежурный режим через 1 секунду
+    setTimeout(() => {
+        if (auth.currentUser) initPeer(auth.currentUser.uid);
+    }, 1000);
+}
 // 8. Управление аудио и таймер
 function setupRemoteAudio(stream) {
     console.log("🎧 Настройка аудио потока...");
