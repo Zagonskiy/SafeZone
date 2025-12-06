@@ -1152,38 +1152,50 @@ function unlockAudioEngine() {
 function initPeer(uid) {
     if (peer && !peer.destroyed) return;
 
-    // Используем UID как PeerID для простоты соединения
-    peer = new Peer(uid, {
+    // Генерируем УНИКАЛЬНЫЙ ID для этой сессии (uid + случайное число)
+    // Это критически важно, чтобы избежать конфликтов при перезагрузке
+    const sessionPeerId = uid + '_' + Math.floor(Math.random() * 10000);
+
+    peer = new Peer(sessionPeerId, {
         debug: 1,
         config: {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                // Если есть возможность, добавьте сюда TURN сервер для работы через 4G
+                // БЕСПЛАТНЫЙ TURN СЕРВЕР (OpenRelay) - помогает пробить NAT
+                {
+                    urls: "turn:openrelay.metered.ca:80",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                },
+                {
+                    urls: "turn:openrelay.metered.ca:443",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                },
+                {
+                    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                }
             ]
         }
     });
 
     peer.on('open', (id) => {
-        console.log('✅ PeerJS Online. ID:', id);
+        console.log('✅ My PeerJS ID:', id);
     });
 
     peer.on('error', (err) => {
         console.error("Peer Error:", err.type);
-        // Если ID занят (открыто 2 вкладки), просто игнорируем, звонок придет на одну из них
     });
 
-    // Обработка ВХОДЯЩЕГО прямого P2P соединения (когда уже подняли трубку)
     peer.on('call', (call) => {
-        console.log("⚡ Получен P2P сигнал");
-        
-        // Если у нас уже есть локальный стрим (мы нажали "Ответить"), отдаем его
+        console.log("⚡ Входящий P2P звонок");
         if (localStream) {
             call.answer(localStream);
             handleCallStream(call);
-        } 
-        // Если стрима нет (странная ситуация), пытаемся получить
-        else {
+        } else {
             getMediaStream().then(stream => {
                 localStream = stream;
                 call.answer(stream);
@@ -1249,48 +1261,48 @@ if (btnCall) {
     btnCall.addEventListener('click', async () => {
         if (!currentChatId) return;
 
-        // 1. Разблокируем аудио сразу по клику
-        unlockAudioEngine();
+        unlockAudioEngine(); // Разблокируем аудио
 
-        // 2. Получаем ID собеседника
+        // Получаем ID собеседника (Firestore UID)
         const chatDoc = await getDoc(doc(db, "chats", currentChatId));
-        const receiverId = chatDoc.data().participants.find(id => id !== auth.currentUser.uid);
-        if (!receiverId) return;
+        const receiverUid = chatDoc.data().participants.find(id => id !== auth.currentUser.uid);
+        if (!receiverUid) return;
 
-        // 3. Запускаем интерфейс и микрофон
         try {
             localStream = await getMediaStream();
-        } catch(e) { return; } // Ошибка уже показана в getMediaStream
+        } catch(e) { return; }
 
         showActiveCallScreen(currentUserData.nickname, "ОЖИДАНИЕ...");
         
-        // Показываем имя кому звоним
-        getDoc(doc(db, "users", receiverId)).then(s => {
+        getDoc(doc(db, "users", receiverUid)).then(s => {
             if(s.exists()) document.getElementById('call-partner-name').innerText = s.data().nickname;
         });
 
-        // 4. Создаем документ вызова в Firestore
+        // Создаем вызов. pickupId пока пустой
         const callDocRef = await addDoc(collection(db, "calls"), {
             callerId: auth.currentUser.uid,
             callerName: currentUserData.nickname,
             callerAvatar: currentUserData.avatarBase64 || null,
-            receiverId: receiverId,
-            status: "offering", // Предложение
+            receiverId: receiverUid, 
+            status: "offering",
+            pickupId: null, // Сюда получатель запишет свой PeerID
             timestamp: serverTimestamp()
         });
         activeCallDocId = callDocRef.id;
 
-        // 5. Слушаем ответ
+        // Слушаем изменения
         callUnsubscribe = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
             if (!snap.exists()) return;
             const data = snap.data();
 
-            if (data.status === "answered") {
+            // ЕСЛИ ОТВЕТИЛИ И ПРИСЛАЛИ ID
+            if (data.status === "answered" && data.pickupId) {
                 document.getElementById('call-status-text').innerText = "СОЕДИНЕНИЕ...";
-                // Собеседник ответил! Инициируем P2P соединение на его ID
-                // (PeerID собеседника обычно равен его receiverId)
+                
                 if (!currentCall) {
-                    const call = peer.call(receiverId, localStream);
+                    console.log("📞 Звоню на точный ID:", data.pickupId);
+                    // Звоним ТОЧНО на тот ID, который прислал собеседник
+                    const call = peer.call(data.pickupId, localStream);
                     handleCallStream(call);
                 }
             } else if (data.status === "rejected" || data.status === "ended") {
@@ -1340,21 +1352,29 @@ function showIncomingCallModal(docId, data) {
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
     document.getElementById('incoming-call-modal').classList.remove('active');
     
-    // 1. КРИТИЧНО: Разблокируем аудио движок по клику
-    unlockAudioEngine();
+    unlockAudioEngine(); // Разблокируем аудио
 
     try {
-        // 2. Включаем микрофон
         localStream = await getMediaStream();
         
         showActiveCallScreen(incomingCallData.callerName, "ПОДКЛЮЧЕНИЕ...");
 
-        // 3. Обновляем статус в Firestore -> Caller увидит это и начнет P2P соединение
+        // САМОЕ ВАЖНОЕ: Мы отправляем наш ТЕКУЩИЙ PeerID звонящему
+        // Если peer.id еще нет (интернет лагает), ждем его
+        if (!peer || !peer.id) {
+            console.error("PeerJS не готов!");
+            alert("Ошибка связи: PeerJS не готов");
+            rejectCall();
+            return;
+        }
+
+        console.log("📡 Отправляю свой ID для связи:", peer.id);
+
         await updateDoc(doc(db, "calls", activeCallDocId), { 
-            status: "answered"
+            status: "answered",
+            pickupId: peer.id // <--- Вот это решает проблему соединения
         });
 
-        // 4. Подписываемся на удаление звонка (если тот сбросит)
         callUnsubscribe = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
             if (!snap.exists() || snap.data().status === "ended") {
                 endCallLocal();
@@ -1362,6 +1382,7 @@ document.getElementById('btn-answer-call').addEventListener('click', async () =>
         });
 
     } catch (e) {
+        console.error(e);
         rejectCall();
     }
 });
