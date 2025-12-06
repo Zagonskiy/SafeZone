@@ -609,179 +609,63 @@ btnConfirmPhoto.addEventListener('click', async () => {
 // ==========================================
 // === РЕНДЕР И ПРОСМОТР ===
 // ==========================================
-// --- ПРОСМОТРЩИК (LIGHTBOX) ---
-function viewMedia(type, src, caption) {
-    // Сбрасываем дисплеи
-    fullImageView.style.display = 'none';
-    fullVideoView.style.display = 'none';
+// ==========================================
+// === ПРОСМОТРЩИК (LIGHTBOX) ===
+// ==========================================
+
+// Функция принудительного закрытия
+function closeLightbox() {
+    // 1. Сначала МГНОВЕННО скрываем окно
+    imageViewerModal.classList.remove('active');
     
+    // 2. Сбрасываем зум и прокрутку (если были)
+    fullImageView.src = "";
+    
+    // 3. Безопасно останавливаем видео
+    try {
+        fullVideoView.pause();
+        fullVideoView.currentTime = 0; // Перемотка в начало
+        fullVideoView.src = ""; // Очистка источника
+        // Удаляем атрибуты, чтобы не висели в памяти
+        fullVideoView.removeAttribute('src'); 
+    } catch (e) {
+        console.log("Видео уже остановлено");
+    }
+}
+
+function viewMedia(type, src, caption) {
     if (type === 'video') {
+        fullImageView.style.display = 'none';
         fullVideoView.style.display = 'block';
         fullVideoView.src = src;
-        // Пытаемся запустить автоплей (может быть заблокирован браузером со звуком)
+        // Пробуем автоплей, но не ломаем скрипт, если он запрещен
         fullVideoView.play().catch(() => {}); 
     } else {
+        fullVideoView.style.display = 'none';
+        // Безопасная пауза перед скрытием
+        try { fullVideoView.pause(); } catch(e){}
+        
         fullImageView.style.display = 'block';
         fullImageView.src = src;
-        // Останавливаем видео, если оно играло
-        fullVideoView.pause();
-        fullVideoView.src = "";
     }
     
-    // Текст
     const cleanCaption = (caption && caption !== "[ФОТО]" && caption !== "[ВИДЕО]") ? caption : "";
     imageCaptionView.innerText = cleanCaption;
     
-    // Показываем окно (класс active переключает display: flex в CSS)
     imageViewerModal.classList.add('active');
 }
 
-function renderMessage(docSnap) {
-    const msg = docSnap.data();
-    const isMine = msg.senderId === auth.currentUser.uid;
-    const row = document.createElement('div');
-    row.className = `msg-row ${isMine ? 'my' : 'other'}`;
-
-    if (!isMine) {
-        const avatar = document.createElement('img');
-        avatar.className = 'chat-avatar';
-        if (currentChatPartnerAvatar) avatar.src = currentChatPartnerAvatar;
-        else if (msg.senderAvatar) avatar.src = msg.senderAvatar;
-        else avatar.src = DEFAULT_AVATAR;
-        avatar.onclick = () => openProfile(msg.senderId, false);
-        row.appendChild(avatar);
-    }
-
-    const div = document.createElement('div');
-    div.className = `msg ${isMine ? 'my' : 'other'}`;
-    
-    if (!isMine) {
-        const nickSpan = document.createElement('div');
-        nickSpan.innerText = msg.senderNick;
-        nickSpan.style.fontSize = '0.7rem'; nickSpan.style.marginBottom = '2px'; nickSpan.style.color = '#888'; nickSpan.style.cursor = 'pointer';
-        nickSpan.onclick = () => openProfile(msg.senderId, false);
-        div.appendChild(nickSpan);
-    }
-
-    const contentDiv = document.createElement('div');
-    
-    if (msg.audioBase64) {
-        const audioWrapper = document.createElement('div');
-        audioWrapper.className = 'audio-player-wrapper';
-        const audio = document.createElement('audio');
-        audio.controls = true; audio.src = msg.audioBase64;
-        audioWrapper.appendChild(audio);
-        contentDiv.appendChild(audioWrapper);
-
-    } else if (msg.type === 'video' && msg.isChunked) {
-        // --- ВИДЕО КАРТОЧКА ---
-        const videoContainer = document.createElement('div');
-        videoContainer.className = 'video-msg-container';
-        
-        // Берем обложку или дефолтную картинку
-        const thumbSrc = msg.videoThumbnail || DEFAULT_AVATAR; 
-        
-        videoContainer.innerHTML = `
-            <img src="${thumbSrc}" class="msg-video-thumb">
-            <div class="play-icon-overlay"></div>`;
-        
-        // Обработчик клика на ВСЮ карточку
-        videoContainer.onclick = async () => {
-            // Если видео уже скачано в этой сессии
-            if (videoContainer.dataset.blobUrl) {
-                viewMedia('video', videoContainer.dataset.blobUrl, msg.text);
-                return;
-            }
-
-            // Анимация загрузки (меняем иконку)
-            const playIcon = videoContainer.querySelector('.play-icon-overlay');
-            const originalHtml = playIcon.innerHTML; // пусто
-            playIcon.style.border = "2px dashed yellow";
-            playIcon.style.animation = "spin 1s infinite linear"; // Если бы был спиннер, но пока просто рамка
-
-            try {
-                const videoBlob = await loadVideoFromChunks(docSnap.id, msg.mimeType);
-                if (videoBlob) {
-                    const vidUrl = URL.createObjectURL(videoBlob);
-                    videoContainer.dataset.blobUrl = vidUrl; // Кэшируем URL
-                    
-                    // Возвращаем стиль кнопки и открываем
-                    playIcon.style.border = "2px solid #fff";
-                    playIcon.style.animation = "none";
-                    viewMedia('video', vidUrl, msg.text);
-                } else {
-                    alert("ОШИБКА: Файл поврежден");
-                    playIcon.style.borderColor = "red";
-                }
-            } catch (e) {
-                console.error(e);
-                alert("СБОЙ СЕТИ");
-                playIcon.style.borderColor = "red";
-            }
-        };
-        
-        contentDiv.appendChild(videoContainer);
-        
-        // Подпись под видео
-        if(msg.text && msg.text !== "[ВИДЕО]") {
-            const caption = document.createElement('div');
-            caption.innerText = msg.text; 
-            caption.style.marginTop = "5px";
-            contentDiv.appendChild(caption);
-        }
-
-    } else if (msg.imageBase64 || msg.type === 'image') {
-        const img = document.createElement('img');
-        img.src = msg.imageBase64; img.className = 'msg-image-content';
-        img.onclick = () => viewMedia('image', msg.imageBase64, msg.text);
-        contentDiv.appendChild(img);
-        if(msg.text && msg.text !== "[ФОТО]") {
-            const caption = document.createElement('div'); caption.innerText = msg.text; caption.style.marginTop = "5px"; contentDiv.appendChild(caption);
-        }
-    } else {
-        contentDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
-    }
-    div.appendChild(contentDiv);
-
-    const metaDiv = document.createElement('div');
-    metaDiv.className = 'msg-meta';
-    
-    if (isMine && !msg.imageBase64 && !msg.audioBase64 && !msg.videoBase64 && msg.type !== 'video') {
-        const editBtn = document.createElement('span');
-        editBtn.innerText = '[E]'; editBtn.style.cursor = 'pointer'; editBtn.style.marginRight = '5px';
-        editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
-        metaDiv.appendChild(editBtn);
-    }
-    if (isMine) {
-        const delBtn = document.createElement('span');
-        delBtn.innerText = '[X]'; delBtn.style.cursor = 'pointer'; delBtn.style.marginRight = '5px';
-        delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id);
-        metaDiv.appendChild(delBtn);
-    }
-
-    const timeSpan = document.createElement('span');
-    const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
-    timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
-    metaDiv.appendChild(timeSpan);
-
-    if (isMine) {
-        const statusSpan = document.createElement('span');
-        statusSpan.className = 'msg-status';
-        if (docSnap.metadata.hasPendingWrites) {
-            statusSpan.innerHTML = '🕒'; statusSpan.className += ' status-wait';
-        } else if (msg.read) {
-            statusSpan.innerHTML = '✓✓'; statusSpan.className += ' status-read';
-        } else {
-            statusSpan.innerHTML = '✓'; statusSpan.className += ' status-sent';
-        }
-        metaDiv.appendChild(statusSpan);
-    }
-
-    div.appendChild(metaDiv);
-    row.appendChild(div);
-    document.getElementById('messages-area').appendChild(row);
+// Привязка событий закрытия
+if (closeImageViewer) {
+    closeImageViewer.onclick = closeLightbox; // Используем onclick для надежности
 }
 
+imageViewerModal.addEventListener('click', (e) => {
+    // Закрываем, если клик был по черному фону (а не по картинке/видео)
+    if (e.target === imageViewerModal) {
+        closeLightbox();
+    }
+});
 // ==========================================
 // === ПРОФИЛЬ, ПОИСК, УДАЛЕНИЕ ===
 // ==========================================
