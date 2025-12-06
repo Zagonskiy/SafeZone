@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
     <title>SafeZone | Secure Terminal</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 </head>
 <body>
 
@@ -88,6 +89,11 @@
                     <header class="top-bar chat-header">
                         <button id="back-btn" class="btn-small mobile-only"><</button>
                         <span id="chat-title">КАНАЛ: НЕ ВЫБРАН</span>
+                        <button id="btn-call" class="btn-small btn-phone-call" style="display: none; margin-left: auto; margin-right: 5px;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                            </svg>
+                        </button>
                         <button id="btn-toggle-search" class="btn-small" style="margin-left: auto; display: none; padding: 4px 8px; align-items: center; justify-content: center;">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M20 20L16.65 16.65" stroke="#33ff33" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -216,6 +222,54 @@
         </div>
     </div>
 
+    <audio id="remote-audio" autoplay></audio>
+
+<div id="incoming-call-modal" class="modal-overlay" style="z-index: 50000;">
+    <div class="modal-box call-box">
+        <div class="radar-pulse"></div>
+        <div class="modal-title blink-text">/// ВХОДЯЩАЯ СВЯЗЬ ///</div>
+        <div class="call-avatar-container">
+            <img id="incoming-call-avatar" src="" class="call-avatar">
+        </div>
+        <h3 id="incoming-caller-name">UNKNOWN</h3>
+        <p>ЗАПРАШИВАЕТ ГОЛОСОВОЙ КАНАЛ</p>
+        <div class="modal-actions">
+            <button id="btn-decline-call" class="btn-metal danger">ОТКЛОНИТЬ</button>
+            <button id="btn-answer-call" class="btn-metal success">ОТВЕТИТЬ</button>
+        </div>
+    </div>
+</div>
+
+<div id="active-call-screen" class="call-screen">
+    <div class="call-info-wrapper">
+        <div class="signal-bars">
+            <div class="bar b1"></div><div class="bar b2"></div><div class="bar b3"></div><div class="bar b4"></div>
+        </div>
+        <h2 id="call-status-text">СОЕДИНЕНИЕ...</h2>
+        <h1 id="call-partner-name">PARTNER</h1>
+        <div id="call-timer" class="call-timer">00:00</div>
+    </div>
+
+    <div class="call-controls">
+        <button id="btn-mic-toggle" class="btn-round">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+        </button>
+        
+        <button id="btn-hangup" class="btn-round red">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"></path>
+                <line x1="23" y1="1" x2="1" y2="23"></line>
+            </svg>
+        </button>
+    </div>
+</div>
+
+                        
     <script type="module" src="app.js"></script>
 </body>
 </html>
