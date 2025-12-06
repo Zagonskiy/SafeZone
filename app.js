@@ -1125,7 +1125,8 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 
 // ==========================================
 // === 1. Инициализация P2P (КРИТИЧЕСКИЕ ИСПРАВЛЕНИЯ) ===
-// ==========================================function initPeer(uid) {
+// ==========================================
+function initPeer(uid) {
     if (peer) return;
     
     console.log("🚀 Initializing PeerJS with ID:", uid);
@@ -1243,6 +1244,7 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
         });
     }
 });
+
 
 // 2. Слушаем Firestore на предмет входящих вызовов
 function listenForIncomingCalls(myUid) {
