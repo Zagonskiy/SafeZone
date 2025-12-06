@@ -480,3 +480,70 @@ audio::-webkit-media-controls-panel { background-color: transparent !important; 
     color: #fff;
     box-shadow: 0 0 10px var(--alert-red);
 }
+
+/* --- ЗВОНКИ --- */
+.btn-phone-call {
+    background: var(--text-green); 
+    border: 1px solid var(--text-dim);
+    border-radius: 50%;
+    width: 35px; height: 35px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(51, 255, 51, 0.4);
+    animation: glow-green 2s infinite;
+}
+.btn-phone-call:active { transform: scale(0.9); }
+@keyframes glow-green { 0% {box-shadow: 0 0 5px var(--text-green);} 50% {box-shadow: 0 0 15px var(--text-green);} 100% {box-shadow: 0 0 5px var(--text-green);} }
+
+.btn-metal.success { border-bottom: 2px solid var(--text-green); color: var(--text-green); }
+.btn-metal.success:hover { background: rgba(0, 50, 0, 0.5); }
+
+/* Модалка входящего */
+.call-box { border: 2px solid var(--text-green); position: relative; overflow: hidden; }
+.blink-text { animation: blink 1s infinite; color: var(--text-green); font-weight: bold; margin-bottom: 15px; }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.call-avatar-container { display: flex; justify-content: center; margin: 15px 0; position: relative; z-index: 2; }
+.call-avatar { width: 80px; height: 80px; border-radius: 50%; border: 3px solid var(--text-green); object-fit: cover; background: #000; }
+.radar-pulse {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 200px; height: 200px; border-radius: 50%;
+    border: 1px solid var(--text-green); opacity: 0;
+    animation: radar 2s infinite linear; z-index: 1;
+}
+@keyframes radar { 0% { width: 0; height: 0; opacity: 0.8; } 100% { width: 300px; height: 300px; opacity: 0; } }
+
+/* Экран активного звонка */
+.call-screen {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(circle, #1a2a1a 0%, #000 90%);
+    z-index: 60000; display: none;
+    flex-direction: column; justify-content: space-between; align-items: center;
+    padding: 50px 20px; box-sizing: border-box;
+}
+.call-screen.active { display: flex; }
+
+.call-info-wrapper { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+#call-status-text { font-size: 0.9rem; color: #888; letter-spacing: 2px; }
+#call-partner-name { font-size: 2rem; color: var(--text-green); text-shadow: 0 0 20px var(--text-green); margin: 10px 0; }
+.call-timer { font-size: 1.5rem; font-family: monospace; border: 1px solid var(--text-dim); padding: 5px 15px; border-radius: 5px; background: #000; }
+
+.call-controls { display: flex; gap: 30px; margin-bottom: 50px; }
+.btn-round {
+    width: 70px; height: 70px; border-radius: 50%;
+    border: 2px solid var(--text-dim); background: #222; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: 0.2s; font-size: 1.5rem;
+}
+.btn-round:hover { transform: scale(1.1); }
+.btn-round.red { background: var(--alert-red); border-color: red; animation: pulse-red 2s infinite; }
+.btn-round.muted { background: #555; opacity: 0.7; position: relative; }
+.btn-round.muted::after { content: ''; position: absolute; width: 100%; height: 2px; background: red; transform: rotate(45deg); }
+
+.signal-bars { display: flex; gap: 4px; height: 20px; align-items: flex-end; margin-bottom: 20px; }
+.bar { width: 6px; background: var(--text-dim); }
+.b1 { height: 30%; animation: signal 1s infinite; }
+.b2 { height: 50%; animation: signal 1.2s infinite; }
+.b3 { height: 70%; animation: signal 0.8s infinite; }
+.b4 { height: 100%; animation: signal 1.5s infinite; }
+@keyframes signal { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; background: var(--text-green); } }
+@keyframes pulse-red { 0% { box-shadow: 0 0 0 rgba(255, 0, 0, 0.4); } 50% { box-shadow: 0 0 20px rgba(255, 0, 0, 0.7); } 100% { box-shadow: 0 0 0 rgba(255, 0, 0, 0.4); } }
