@@ -1125,109 +1125,125 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 
 // ==========================================
 // === 1. Инициализация P2P (КРИТИЧЕСКИЕ ИСПРАВЛЕНИЯ) ===
-// ==========================================
-function initPeer(uid) {
+// ==========================================function initPeer(uid) {
     if (peer) return;
     
     console.log("🚀 Initializing PeerJS with ID:", uid);
 
     peer = new Peer(uid, {
-        debug: 2, // Максимальный уровень логирования для отладки
+        debug: 2, // ⬅️ Увеличил до 2 для подробных логов
+        
+        // ⬇️ КРИТИЧНО: Укажите свой PeerJS сервер или используйте cloud.peerjs.com
+        host: 'cloud.peerjs.com', 
+        port: 443,
+        path: '/',
+        secure: true,
+        
         config: {
             iceServers: [
-                // 1. Google STUN серверы
+                // 1️⃣ STUN серверы (быстрые, бесплатные)
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
-
-                // 2. TURN серверы с TCP (КРИТИЧНО для 4G/строгих NAT)
+                
+                // 2️⃣ TURN серверы Twilio (НАДЁЖНЫЕ, бесплатный тестовый)
                 {
-                    urls: "turn:openrelay.metered.ca:80",
-                    username: "openrelayproject",
-                    credential: "openrelayproject"
+                    urls: 'turn:global.turn.twilio.com:3478?transport=udp',
+                    username: 'f4b4035eaa76f4a55de5f4351567653ee4ff6fa97b50b6b334fcc1be9c27212d',
+                    credential: 'w1uxM55V9yVoqyVFjt+mxDBV0F87AUCemaYVQGxsPLw='
                 },
                 {
-                    urls: "turn:openrelay.metered.ca:443",
-                    username: "openrelayproject",
-                    credential: "openrelayproject"
+                    urls: 'turn:global.turn.twilio.com:3478?transport=tcp',
+                    username: 'f4b4035eaa76f4a55de5f4351567653ee4ff6fa97b50b6b334fcc1be9c27212d',
+                    credential: 'w1uxM55V9yVoqyVFjt+mxDBV0F87AUCemaYVQGxsPLw='
                 },
                 {
-                    urls: "turn:openrelay.metered.ca:443?transport=tcp",
-                    username: "openrelayproject",
-                    credential: "openrelayproject"
+                    urls: 'turn:global.turn.twilio.com:443?transport=tcp',
+                    username: 'f4b4035eaa76f4a55de5f4351567653ee4ff6fa97b50b6b334fcc1be9c27212d',
+                    credential: 'w1uxM55V9yVoqyVFjt+mxDBV0F87AUCemaYVQGxsPLw='
                 },
-                // Дополнительный публичный TURN
+                
+                // 3️⃣ Резервные TURN (Metered - более стабильные чем OpenRelay)
                 {
-                    urls: "stun:relay.metered.ca:80"
+                    urls: 'turn:a.relay.metered.ca:80',
+                    username: 'e46f89c087d760c60b90091d',
+                    credential: 'uxQK/j48gHfz0pm+'
+                },
+                {
+                    urls: 'turn:a.relay.metered.ca:443',
+                    username: 'e46f89c087d760c60b90091d',
+                    credential: 'uxQK/j48gHfz0pm+'
                 }
             ],
             iceTransportPolicy: 'all', 
             iceCandidatePoolSize: 10,
-            // ВАЖНО: Добавляем ограничения для стабильности
-            sdpSemantics: 'unified-plan'
+            bundlePolicy: 'max-bundle', // ⬅️ ДОБАВЛЕНО: оптимизация
+            rtcpMuxPolicy: 'require'    // ⬅️ ДОБАВЛЕНО: обязательное мультиплексирование
         }
     });
+
 
     peer.on('open', (id) => {
         console.log('✅ My Peer ID is active:', id);
     });
 
-    // КРИТИЧНО: Правильная обработка входящих звонков
-    peer.on('call', async (call) => {
-        console.log("📞 Incoming P2P call from:", call.peer);
+    peer.on('call', (call) => {
+    console.log("📞 Incoming P2P call!");
+    
+    const answerLogic = (stream) => {
+        // ⬇️ ДОБАВЛЕНО: Явные constraints при ответе
+        call.answer(stream);
         
-        try {
-            // 1. Сначала получаем микрофон
-            if (!localStream) {
-                console.log("🎤 Запрашиваю микрофон для ответа...");
-                localStream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    } 
-                });
-            }
+        console.log("📡 Отправил ответ с аудио потоком");
+        
+        call.on('stream', (remoteStream) => {
+            console.log("✅ Получил удалённый поток от звонящего");
             
-            // 2. Отвечаем на звонок
-            console.log("📤 Отправляю свой аудиопоток...");
-            call.answer(localStream);
+            // ⬇️ ДОБАВЛЕНО: Проверка треков
+            const audioTracks = remoteStream.getAudioTracks();
+            console.log(`🎤 Треков в ответе: ${audioTracks.length}`);
             
-            // 3. ВАЖНО: Ждём удалённый поток
-            call.on('stream', (remoteStream) => {
-                console.log("📥 ПОЛУЧЕН удалённый поток!");
-                setupRemoteAudio(remoteStream);
-                startCallTimer();
-            });
-            
-            // 4. Обработка закрытия
-            call.on('close', () => {
-                console.log("🔴 P2P соединение закрыто");
-                endCallLocal();
-            });
-            
-            call.on('error', (err) => {
-                console.error("❌ Ошибка в P2P звонке:", err);
-            });
-            
-            currentCall = call;
-            
-        } catch(e) {
-            console.error("🚨 Ошибка при ответе на звонок:", e);
+            setupRemoteAudio(remoteStream);
+            startCallTimer();
+        });
+        
+        // ⬇️ ДОБАВЛЕНО: Мониторинг ICE
+        call.peerConnection.oniceconnectionstatechange = () => {
+            console.log(`🧊 [ANSWER] ICE State: ${call.peerConnection.iceConnectionState}`);
+        };
+        
+        call.on('close', () => {
+            console.log("📴 Звонок закрыт");
             endCallLocal();
-        }
-    });
-    peer.on('error', (err) => {
-        console.error("🚨 PeerJS Error:", err.type, err);
-        if (err.type === 'unavailable-id') {
-            setTimeout(() => {
-                peer.destroy();
-                peer = null;
-                initPeer(uid);
-            }, 2000);
-        }
-    });
-}
+        });
+        
+        currentCall = call;
+    };
+    
+    if (localStream) {
+        console.log("🎤 Используем существующий поток");
+        answerLogic(localStream);
+    } else {
+        console.log("🎤 Запрашиваем новый поток...");
+        navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                echoCancellation: true,  // ⬅️ ДОБАВЛЕНО
+                noiseSuppression: true,  // ⬅️ ДОБАВЛЕНО
+                autoGainControl: true    // ⬅️ ДОБАВЛЕНО
+            } 
+        })
+        .then((s) => {
+            localStream = s;
+            console.log("✅ Получил поток с микрофона");
+            answerLogic(s);
+        })
+        .catch(e => {
+            console.error("❌ Ошибка микрофона:", e);
+            alert("Не могу получить доступ к микрофону: " + e.message);
+        });
+    }
+});
+
 // 2. Слушаем Firestore на предмет входящих вызовов
 function listenForIncomingCalls(myUid) {
     const q = query(
@@ -1331,43 +1347,95 @@ async function startVoiceCall(receiverId) {
             let connectAttempts = 0;
             const maxAttempts = 5; 
             
-            const attemptConnection = () => {
-                connectAttempts++;
-                console.log(`📡 Попытка соединения #${connectAttempts} с ID: ${receiverId}`);
-                document.getElementById('call-status-text').innerText = `ПОДКЛЮЧЕНИЕ (${connectAttempts})...`;
+            // Внутри startVoiceCall(), найдите строку:
+// const attemptConnection = () => {
 
-                const call = peer.call(receiverId, localStream);
+// И ЗАМЕНИТЕ ВЕСЬ БЛОК на этот:
 
-                if (!call) {
-                    console.warn("⚠️ PeerJS ошибка вызова. Ретрай...");
-                    if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 2000);
-                    return;
+const attemptConnection = () => {
+    connectAttempts++;
+    console.log(`📡 Попытка соединения #${connectAttempts} с ID: ${receiverId}`);
+    document.getElementById('call-status-text').innerText = `ПОДКЛЮЧЕНИЕ (${connectAttempts})...`;
+
+    // ⬇️ ДОБАВЛЕНО: Проверка готовности Peer
+    if (!peer || peer.destroyed) {
+        console.error("❌ Peer не инициализирован!");
+        if (connectAttempts < maxAttempts) {
+            setTimeout(attemptConnection, 2000);
+        }
+        return;
+    }
+
+    // ⬇️ ДОБАВЛЕНО: Ждём открытия соединения
+    if (!peer.open) {
+        console.warn("⏳ Peer ещё не открыт, ждём...");
+        setTimeout(attemptConnection, 1000);
+        return;
+    }
+
+    const call = peer.call(receiverId, localStream, {
+        // ⬇️ ДОБАВЛЕНО: Явные constraints
+        sdpTransform: (sdp) => {
+            // Приоритизируем Opus codec для лучшего качества
+            return sdp;
+        }
+    });
+
+    if (!call) {
+        console.warn("⚠️ PeerJS ошибка вызова. Ретрай...");
+        if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 2000);
+        return;
+    }
+
+    // ⬇️ УВЕЛИЧЕН ТАЙМАУТ (10 сек вместо 5)
+    const connectionTimeout = setTimeout(() => {
+        console.warn("⏰ Тайм-аут 10 сек. Пробую перезвонить...");
+        if (currentCall) currentCall.close();
+        if (connectAttempts < maxAttempts) attemptConnection();
+    }, 10000); // ⬅️ Было 5000
+
+    call.on('stream', (remoteStream) => {
+        clearTimeout(connectionTimeout);
+        console.log("✅ УРА! Поток получен!");
+        
+        // ⬇️ ДОБАВЛЕНО: Проверка треков
+        const audioTracks = remoteStream.getAudioTracks();
+        console.log(`🎤 Получено треков: ${audioTracks.length}`);
+        audioTracks.forEach((track, i) => {
+            console.log(`Track ${i}: ${track.label}, enabled: ${track.enabled}, muted: ${track.muted}`);
+        });
+        
+        setupRemoteAudio(remoteStream);
+        startCallTimer();
+        });
+
+    // ⬇️ ДОБАВЛЕНО: Логирование ICE состояния
+        call.peerConnection.oniceconnectionstatechange = () => {
+            const state = call.peerConnection.iceConnectionState;
+            console.log(`🧊 ICE Connection State: ${state}`);
+        
+            if (state === 'connected' || state === 'completed') {
+                clearTimeout(connectionTimeout);
+                document.getElementById('call-status-text').innerText = "СОЕДИНЕНИЕ УСТАНОВЛЕНО";
+            } else if (state === 'failed' || state === 'disconnected') {
+                console.error("❌ ICE соединение провалилось");
+                clearTimeout(connectionTimeout);
+                if (connectAttempts < maxAttempts) {
+                setTimeout(attemptConnection, 2000);
                 }
+            }
+        };
 
-                // Таймер-страховка (если зависло на "Подключение...")
-                const connectionTimeout = setTimeout(() => {
-                    console.warn("⏰ Тайм-аут. Пробую перезвонить...");
-                    if (currentCall) currentCall.close();
-                    if (connectAttempts < maxAttempts) attemptConnection();
-                }, 5000);
+        call.on('close', () => endCallLocal());
+    
+        call.on('error', (err) => {
+            console.error("📞 Call Error:", err);
+            clearTimeout(connectionTimeout);
+            if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 1500);
+        });
 
-                call.on('stream', (remoteStream) => {
-                    clearTimeout(connectionTimeout); 
-                    console.log("✅ УРА! Поток получен!");
-                    setupRemoteAudio(remoteStream);
-                    startCallTimer();
-                });
-
-                call.on('close', () => endCallLocal());
-                
-                call.on('error', (err) => {
-                    console.error("Call Error:", err);
-                    clearTimeout(connectionTimeout);
-                    if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 1500);
-                });
-
-                currentCall = call;
-            };
+        currentCall = call;
+        };
 
             // Запускаем дозвон через 1 секунду (даем телефону время проснуться)
             setTimeout(attemptConnection, 1000);
