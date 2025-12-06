@@ -67,6 +67,7 @@ const btnMicRec = document.getElementById('btn-mic-rec');
 const recordingOverlay = document.getElementById('recording-overlay'); 
 const chatImgUpload = document.getElementById('chat-img-upload');
 const btnAttachImg = document.getElementById('btn-attach-img');
+const btnCall = document.getElementById('btn-call');
 
 // Просмотрщик
 const imageViewerModal = document.getElementById('image-viewer-modal');
@@ -248,6 +249,23 @@ document.getElementById('to-login').addEventListener('click', () => {
 });
 document.getElementById('back-btn').addEventListener('click', () => { 
     chatPanel.classList.remove('open');
+
+    // Скрыть кнопку звонка при выходе
+    if(btnCall) btnCall.style.display = 'none'; 
+
+    // Скрыть поиск
+    if(document.getElementById('btn-toggle-search')) {
+        document.getElementById('btn-toggle-search').style.display = 'none';
+        document.getElementById('chat-search-bar').style.display = 'none';
+        document.getElementById('chat-search-input').value = '';
+    }
+    // ... остальной код (unsubscribeMessages и т.д.) ...
+    if (unsubscribeMessages) unsubscribeMessages(); 
+    currentChatId = null; 
+    document.getElementById('msg-form').style.display = 'none'; 
+    document.getElementById('chat-title').innerText = "КАНАЛ: НЕ ВЫБРАН"; 
+    document.getElementById('messages-area').innerHTML = '<div class="no-chat-selected"><p>> СВЯЗЬ ПРЕРВАНА</p></div>'; 
+});
     // Скрыть поиск
 if(document.getElementById('btn-toggle-search')) {
     document.getElementById('btn-toggle-search').style.display = 'none';
@@ -328,11 +346,14 @@ async function openChat(chatId, chatName) {
     document.getElementById('messages-area').innerHTML = ''; 
     
     chatPanel.classList.add('open');
+    
     // Показать кнопку звонка
     if(btnCall) btnCall.style.display = 'flex';
-    // Скрыть кнопку звонка
-    if(btnCall) btnCall.style.display = 'none';
+    
     // Показать кнопку поиска
+    if(document.getElementById('btn-toggle-search')) {
+        document.getElementById('btn-toggle-search').style.display = 'block';
+    }
 if(document.getElementById('btn-toggle-search')) {
     document.getElementById('btn-toggle-search').style.display = 'block';
 }
@@ -1181,7 +1202,6 @@ function showIncomingCallModal(docId, data) {
 }
 
 // 4. Начало звонка (исходящий)
-const btnCall = document.getElementById('btn-call');
 
 // В openChat добавьте: if(btnCall) btnCall.style.display = 'flex';
 // В back-btn listener добавьте: if(btnCall) btnCall.style.display = 'none';
