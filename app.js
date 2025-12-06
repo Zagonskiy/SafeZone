@@ -1335,6 +1335,8 @@ async function startVoiceCall(receiverId) {
             // Даем телефону 1 секунду на "раздупление" после нажатия кнопки
             setTimeout(attemptConnection, 1000);
         }
+    }
+}
             
             // Добавляем слушатель ошибок специально для этого звонка
             // Если вылетит peer-unavailable, пробуем снова
