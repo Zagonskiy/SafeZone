@@ -155,30 +155,45 @@ textarea.terminal-textarea { height: 80px; resize: none; }
     flex-wrap: nowrap;   
 }
 
-/* ЗОНА ВВОДА */
+/* --- ЗОНА ВВОДА (ИСПРАВЛЕНО ВЫРАВНИВАНИЕ) --- */
 .msg-input-area { 
     width: 100%;
     flex-shrink: 0; 
     display: flex; 
+    align-items: stretch; /* Растягивает все элементы по высоте */
+    height: 50px;         /* Фиксированная высота для всего бара */
     gap: 0; 
     background: #000; 
-    padding: 5px 0; 
+    padding: 0;           /* Убираем отступы, чтобы кнопки прилипали */
     border-top: 1px solid var(--text-dim);
     padding-bottom: env(safe-area-inset-bottom); 
+    box-sizing: content-box; /* Чтобы padding bottom не съедал высоту */
 }
-.msg-input-area input { border: none; height: 50px; }
-.btn-send {
-    width: 60px;
-    margin: 0;
+
+/* Поле ввода */
+.msg-input-area input { 
+    flex: 1; /* Занимает все свободное место */
+    height: 100%; 
     border: none;
     border-left: 1px solid var(--text-dim);
-    height: 50px;
+    border-right: 1px solid var(--text-dim);
+    margin: 0;
+    box-sizing: border-box;
+}
+
+/* Кнопки в чате (+, микрофон, отправка) */
+.btn-send, .btn-icon {
+    width: 60px;
+    height: 100%; /* Полная высота */
+    margin: 0;
+    border: none;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.2rem;
+    font-size: 1.5rem;
     padding: 0;
     background: #111; 
+    border-radius: 0; /* Убираем скругление внутри бара */
 }
 
 /* ПОИСК */
@@ -249,9 +264,7 @@ textarea.terminal-textarea { height: 80px; resize: none; }
 }
 
 /* КНОПКИ И ПРЕВЬЮ */
-.btn-icon { width: 50px; height: 50px; font-size: 1.5rem; padding: 0; display: flex; align-items: center; justify-content: center; margin-top: 0; }
 .msg-image-content { max-width: 100%; max-height: 300px; border-radius: 5px; margin-top: 5px; border: 1px solid var(--text-green); cursor: pointer; }
-.msg-input-area input { border-left: 1px solid var(--text-dim); }
 .preview-container { margin-bottom: 15px; border: 1px solid var(--text-dim); background: #000; padding: 5px; display: flex; justify-content: center; }
 #photo-preview-img { max-width: 100%; max-height: 40vh; object-fit: contain; border: 1px solid #333; }
 
@@ -372,33 +385,34 @@ audio::-webkit-media-controls-panel { background-color: transparent !important; 
 
 /* КРЕСТИК - ИСПРАВЛЕННЫЙ */
 .close-btn {
-    position: fixed; /* Фиксируем от экрана, а не от окна */
+    position: fixed; /* Фиксируем от ЭКРАНА */
     top: 20px;
     right: 20px;
     
-    width: 40px;
-    height: 40px;
-    background: rgba(0,0,0,0.5); /* Фон, чтобы было видно */
-    border-radius: 50%;
-    border: 1px solid #fff;
-    
     color: #fff;
-    font-size: 2rem;
+    font-size: 3rem; /* Крупный символ */
     font-weight: bold;
-    line-height: 35px; /* Центровка крестика */
-    text-align: center;
+    line-height: 1;
+    
+    background: transparent; /* Убрал круглый фон */
+    border: none; /* Убрал рамку */
+    border-radius: 0;
+    
+    width: auto;
+    height: auto;
+    padding: 15px; /* Большая зона клика для пальца */
     
     cursor: pointer;
-    z-index: 40000; /* ВЫШЕ ВСЕГО */
+    z-index: 40000; /* Самый верхний слой */
     transition: 0.2s;
 }
-.close-btn:hover { color: var(--alert-red); border-color: var(--alert-red); background: #222; }
+.close-btn:hover { color: var(--alert-red); }
 
 /* АДАПТИВНОСТЬ ДЛЯ ТЕЛЕФОНОВ */
 @media (max-width: 768px) {
     .modal-content-img, #full-video-view {
         width: 100%; 
-        max-height: 50vh; /* На телефоне видео меньше, чтобы влез текст */
+        max-height: 50vh; 
     }
     .caption-text { font-size: 0.9rem; }
 }
