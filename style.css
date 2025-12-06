@@ -564,45 +564,53 @@ audio::-webkit-media-controls-panel {
     color: #000;
 }
 
-/* --- СТИЛИ ДЛЯ ВИДЕО --- */
+/* --- СТИЛИ ДЛЯ ВИДЕО (ИСПРАВЛЕНО) --- */
 
-/* Контейнер видео-сообщения (Обложка + Кнопка) */
+/* Контейнер видео - теперь это четкая "карточка" */
 .video-msg-container {
     position: relative;
-    display: inline-block;
-    max-width: 100%;
-    cursor: pointer;
-}
-
-/* Обложка видео (выглядит как фото) */
-.msg-video-thumb {
     display: block;
-    max-width: 100%;
-    max-height: 250px;
-    border-radius: 5px;
-    margin-top: 5px;
+    width: 240px;       /* Фиксированная ширина */
+    height: 135px;      /* Пропорция 16:9 */
+    background-color: #000;
     border: 1px solid var(--text-green);
-    /* Легкий фильтр для превью в чате (можно убрать, если хочешь цветное и в чате) */
-    filter: sepia(50%) hue-rotate(65deg) contrast(1.1); 
+    border-radius: 8px;
+    overflow: hidden;   /* Всё, что вылезает - обрезаем */
+    cursor: pointer;
+    margin-top: 5px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
 }
 
-/* Кнопка PLAY поверх обложки */
+/* Обложка видео */
+.msg-video-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* Картинка заполняет весь блок, лишнее обрезается */
+    display: block;
+    
+    /* УБРАНЫ ФИЛЬТРЫ - теперь цвета натуральные */
+    opacity: 0.8; /* Чуть затемняем, чтобы кнопку Play было видно */
+    transition: 0.3s;
+}
+
+/* Кнопка PLAY (теперь всегда по центру карточки) */
 .play-icon-overlay {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: 50px;
-    height: 50px;
-    background: rgba(0, 0, 0, 0.6);
-    border: 2px solid var(--text-green);
+    
+    width: 40px;
+    height: 40px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 2px solid #fff; /* Белая рамка для контраста */
     border-radius: 50%;
+    
     display: flex;
     align-items: center;
     justify-content: center;
-    pointer-events: none; /* Чтобы клик проходил сквозь кнопку на картинку */
-    box-shadow: 0 0 15px rgba(51, 255, 51, 0.5);
-    transition: 0.2s;
+    pointer-events: none; /* Пропускает клики сквозь себя на контейнер */
+    z-index: 2;
 }
 
 /* Треугольник Play */
@@ -611,18 +619,26 @@ audio::-webkit-media-controls-panel {
     display: block;
     width: 0; 
     height: 0; 
-    border-top: 10px solid transparent;
-    border-bottom: 10px solid transparent;
-    border-left: 18px solid var(--text-green);
-    margin-left: 5px; /* Визуальная центровка */
+    border-top: 8px solid transparent;
+    border-bottom: 8px solid transparent;
+    border-left: 14px solid #fff; /* Белый треугольник */
+    margin-left: 4px;
 }
 
+/* Эффект наведения */
+.video-msg-container:hover .msg-video-thumb {
+    opacity: 1; /* При наведении картинка становится ярче */
+    transform: scale(1.05); /* Легкое увеличение */
+}
 .video-msg-container:hover .play-icon-overlay {
-    background: rgba(0, 0, 0, 0.8);
-    transform: translate(-50%, -50%) scale(1.1);
+    background: var(--text-green); /* Кнопка загорается зеленым */
+    border-color: #000;
+}
+.video-msg-container:hover .play-icon-overlay::after {
+    border-left-color: #000; /* Треугольник чернеет */
 }
 
-/* ВИДЕО В ЛАЙТБОКСЕ (ПОЛНЫЙ ЭКРАН) - БЕЗ ЗЕЛЕНОГО ФИЛЬТРА */
+/* ВИДЕО В ЛАЙТБОКСЕ (ПОЛНЫЙ ЭКРАН) */
 #full-video-view {
     width: 100%;
     max-width: 800px;
@@ -630,7 +646,6 @@ audio::-webkit-media-controls-panel {
     border: 2px solid var(--text-green);
     box-shadow: 0 0 50px rgba(51, 255, 51, 0.2);
     background: #000;
-    
-    /* УБРАНЫ ВСЕ ФИЛЬТРЫ ЦВЕТА */
-    filter: none; 
+    outline: none;
+    /* Без фильтров */
 }
