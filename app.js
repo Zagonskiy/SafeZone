@@ -126,21 +126,20 @@ function showModal(text, type = 'alert', placeholder = '') {
 }
 
 // ==========================================
-// === ГЛАВНЫЙ КОНТРОЛЛЕР ВХОДА (САМОЛЕЧЕНИЕ) ===
+// === ГЛАВНЫЙ КОНТРОЛЛЕР ВХОДА (ИСПРАВЛЕННЫЙ) ===
 // ==========================================
 onAuthStateChanged(auth, async (user) => {
     if (user) {
         authScreen.classList.remove('active');
         appInterface.classList.remove('hidden');
         
+        // 1. ЗАГРУЗКА ПРОФИЛЯ (Изолированный блок)
         try {
             const userDoc = await getDoc(doc(db, "users", user.uid));
             
             if (userDoc.exists()) {
-                // Если профиль есть - грузим
                 currentUserData = { uid: user.uid, ...userDoc.data() };
             } else {
-                // ЕСЛИ ПРОФИЛЯ НЕТ (БАГ "UNKNOWN") -> СОЗДАЕМ АВТОМАТИЧЕСКИ
                 console.log("Профиль не найден. Создаю новый...");
                 const newProfile = { 
                     nickname: "Soldier-" + user.uid.slice(0, 4), 
@@ -155,32 +154,37 @@ onAuthStateChanged(auth, async (user) => {
             
             updateMyDisplay();
             loadMyChats();
-            // Внутри onAuthStateChanged, после loadMyChats();
-            initPeer(user.uid);
-            listenForIncomingCalls(user.uid);
             
         } catch (e) {
-            console.error("Critical Auth Error:", e);
-            showModal("СБОЙ СИСТЕМЫ ПРИ ЗАГРУЗКЕ ПРОФИЛЯ", "alert");
+            console.error("Critical Auth Error (Profile):", e);
+            showModal("СБОЙ ЗАГРУЗКИ ПРОФИЛЯ. ПРОВЕРЬТЕ СЕТЬ.", "alert");
+            return; // Останавливаемся, если профиль не загрузился
         }
+
+        // 2. ЗАПУСК СИСТЕМЫ ЗВОНКОВ (В отдельном блоке, чтобы не ломать профиль)
+        try {
+            // Проверяем, есть ли вообще поддержка WebRTC в этом браузере
+            if (navigator.mediaDevices && window.Peer) {
+                console.log("🚀 Запуск системы связи...");
+                listenForIncomingCalls(user.uid);
+                // Peer создадим только при необходимости или отложенно
+            } else {
+                console.warn("⚠️ WebRTC или PeerJS не поддерживаются (возможно HTTP вместо HTTPS)");
+            }
+        } catch (callError) {
+            console.error("Ошибка инициализации звонков (не критично):", callError);
+            // Не показываем модалку пользователю, просто пишем в консоль
+        }
+
     } else {
         appInterface.classList.add('hidden');
         authScreen.classList.add('active');
         currentUserData = null;
+        // Очистка при выходе
+        if (callUnsubscribe) callUnsubscribe();
+        if (peer) peer.destroy();
     }
 });
-
-function updateMyDisplay() {
-    if (currentUserData) {
-        userDisplay.innerText = `БОЕЦ: ${currentUserData.nickname}`;
-        if (currentUserData.avatarBase64) {
-            myMiniAvatar.src = currentUserData.avatarBase64;
-        } else {
-            myMiniAvatar.src = DEFAULT_AVATAR;
-        }
-        myMiniAvatar.style.display = 'block';
-    }
-}
 
 // ==========================================
 // === ВХОД И РЕГИСТРАЦИЯ ===
