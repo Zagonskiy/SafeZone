@@ -1379,50 +1379,44 @@ async function startVoiceCall(receiverId) {
     });
 }            
 
-// 5. Ответ на звонок (МОБИЛЬНАЯ ВЕРСИЯ + RECONNECT)
+// 5. Ответ на звонок (ИСПРАВЛЕННАЯ ВЕРСИЯ С ОЖИДАНИЕМ)
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
     document.getElementById('incoming-call-modal').classList.remove('active');
     
-    // 1. Разблокировка аудио (Hack for iOS/Android)
+    // 1. Разблокировка аудио (Chrome/iOS Hack)
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
 
     try {
-        showActiveCallScreen(incomingCallData.callerName, "ПОДГОТОВКА СЕТИ...");
+        showActiveCallScreen(incomingCallData.callerName, "ПОДКЛЮЧЕНИЕ К СЕТИ...");
         
-        // 2. Получаем микрофон
+        // 2. Получаем доступ к микрофону
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         
-        // 3. ПРОВЕРКА СВЯЗИ С PEERJS ПЕРЕД ОТВЕТОМ
-        if (peer.disconnected) {
-            console.log("⚠️ Peer был отключен. Принудительное переподключение...");
-            document.getElementById('call-status-text').innerText = "ВОССТАНОВЛЕНИЕ СЕТИ...";
-            peer.reconnect();
-        }
+        // 3. ЖДЕМ, ПОКА PEERJS РЕАЛЬНО ПОДКЛЮЧИТСЯ
+        // Это ключевой момент: мы не обновляем базу, пока не убедимся, что мы в сети
+        await ensurePeerConnected();
 
-        // Ждем 1.5 секунды, чтобы PeerJS точно успел соединиться с сервером
-        // и чтобы собеседник (ПК) успел получить новый статус
-        setTimeout(async () => {
-            document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ P2P...";
-            
-            // Только теперь говорим "Я ответил"
-            await updateDoc(doc(db, "calls", activeCallDocId), { status: "answered" });
-            
-            const unsub = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
-                if (snap.exists() && snap.data().status === "ended") {
-                    unsub();
-                    endCallLocal();
-                }
-            });
-        }, 1500); // Увеличенная задержка для мобильных сетей
+        document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ СОБЕСЕДНИКА...";
+        console.log("✅ Сеть готова. Отправляем сигнал ответа в базу...");
+
+        // 4. Только теперь обновляем статус в Firestore
+        await updateDoc(doc(db, "calls", activeCallDocId), { status: "answered" });
+        
+        // Слушаем завершение
+        const unsub = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
+            if (snap.exists() && snap.data().status === "ended") {
+                unsub();
+                endCallLocal();
+            }
+        });
 
     } catch(e) {
-        console.error(e);
-        alert("Ошибка: " + e.message);
+        console.error("Ошибка при ответе:", e);
+        alert("Не удалось ответить: " + e.message);
         rejectCall();
     }
 });
-
 // 6. Отклонение
 document.getElementById('btn-decline-call').addEventListener('click', rejectCall);
 
@@ -1602,3 +1596,55 @@ document.body.addEventListener('touchstart', function() {
         }).catch(() => {});
     }
 }, { once: true });
+
+// Вспомогательная функция: Гарантирует, что мы подключены к PeerJS
+function ensurePeerConnected() {
+    return new Promise((resolve, reject) => {
+        if (!peer) {
+            reject("Peer объект не существует");
+            return;
+        }
+
+        if (!peer.disconnected && !peer.destroyed) {
+            console.log("✅ PeerJS уже активен и готов.");
+            resolve();
+            return;
+        }
+
+        console.log("⏳ PeerJS отключен. Восстанавливаем соединение...");
+        
+        // Временный слушатель открытия
+        const onOpen = () => {
+            peer.off('open', onOpen);
+            peer.off('error', onError);
+            console.log("✅ PeerJS восстановлен!");
+            resolve();
+        };
+
+        const onError = (err) => {
+            console.warn("⚠️ Ошибка при восстановлении PeerJS:", err);
+            // Даже если ошибка (например ID занят), пробуем продолжить, 
+            // так как peer может пересоздаться
+            // Но лучше здесь не реджектить сразу, а дать шанс ретраю в initPeer
+        };
+
+        peer.on('open', onOpen);
+        peer.on('error', onError);
+
+        peer.reconnect();
+
+        // Тайм-аут на случай, если реконнект зависнет
+        setTimeout(() => {
+            if (!peer.disconnected) {
+                resolve(); // Успели
+            } else {
+                console.log("⚠️ Тайм-аут реконнекта. Пробуем жесткую перезагрузку Peer...");
+                // Крайний случай: убиваем и создаем заново
+                peer.destroy();
+                initPeer(auth.currentUser.uid);
+                // Даем еще 1 сек и надеемся на лучшее
+                setTimeout(resolve, 1000); 
+            }
+        }, 2000);
+    });
+}
