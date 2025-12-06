@@ -48,6 +48,7 @@ const appInterface = document.getElementById('app-interface');
 const chatPanel = document.getElementById('chat-screen');
 const userDisplay = document.getElementById('user-display');
 const myMiniAvatar = document.getElementById('my-mini-avatar');
+const fullscreenBtn = document.getElementById('fullscreen-btn');
 
 // Чат элементы
 const msgInput = document.getElementById('msg-input');
@@ -615,58 +616,68 @@ btnConfirmPhoto.addEventListener('click', async () => {
 
 // Функция принудительного закрытия
 function closeLightbox() {
-    // 1. Сначала МГНОВЕННО скрываем окно
     imageViewerModal.classList.remove('active');
-    
-    // 2. Сбрасываем зум и прокрутку (если были)
     fullImageView.src = "";
-    
-    // 3. Безопасно останавливаем видео
     try {
         fullVideoView.pause();
-        fullVideoView.currentTime = 0; // Перемотка в начало
-        fullVideoView.src = ""; // Очистка источника
-        // Удаляем атрибуты, чтобы не висели в памяти
+        fullVideoView.currentTime = 0;
+        fullVideoView.src = ""; 
         fullVideoView.removeAttribute('src'); 
-    } catch (e) {
-        console.log("Видео уже остановлено");
-    }
+    } catch (e) { console.log("Видео остановлено"); }
 }
 
 function viewMedia(type, src, caption) {
+    // Сбрасываем всё
+    fullImageView.style.display = 'none';
+    fullVideoView.style.display = 'none';
+    
+    // Управление кнопкой полного экрана
+    if (fullscreenBtn) fullscreenBtn.style.display = 'none'; 
+
     if (type === 'video') {
-        fullImageView.style.display = 'none';
         fullVideoView.style.display = 'block';
         fullVideoView.src = src;
-        // Пробуем автоплей, но не ломаем скрипт, если он запрещен
+        
+        // Показываем кнопку полного экрана только для видео
+        if (fullscreenBtn) fullscreenBtn.style.display = 'block';
+        
         fullVideoView.play().catch(() => {}); 
     } else {
-        fullVideoView.style.display = 'none';
-        // Безопасная пауза перед скрытием
         try { fullVideoView.pause(); } catch(e){}
-        
         fullImageView.style.display = 'block';
         fullImageView.src = src;
     }
     
     const cleanCaption = (caption && caption !== "[ФОТО]" && caption !== "[ВИДЕО]") ? caption : "";
     imageCaptionView.innerText = cleanCaption;
-    
     imageViewerModal.classList.add('active');
 }
 
-// Привязка событий закрытия
-if (closeImageViewer) {
-    closeImageViewer.onclick = closeLightbox; // Используем onclick для надежности
+// ЛОГИКА КНОПКИ ПОЛНОГО ЭКРАНА (УНИВЕРСАЛЬНАЯ)
+if (fullscreenBtn) {
+    fullscreenBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // Чтобы не закрылось окно при клике
+        const v = fullVideoView;
+        
+        if (v.requestFullscreen) {
+            v.requestFullscreen(); // Стандарт (Android/PC)
+        } else if (v.webkitEnterFullscreen) {
+            v.webkitEnterFullscreen(); // iOS (iPhone)
+        } else if (v.webkitRequestFullscreen) {
+            v.webkitRequestFullscreen(); // Старые Android
+        } else if (v.mozRequestFullScreen) {
+            v.mozRequestFullScreen(); // Firefox
+        }
+    });
 }
 
-imageViewerModal.addEventListener('click', (e) => {
-    // Закрываем, если клик был по черному фону (а не по картинке/видео)
-    if (e.target === imageViewerModal) {
-        closeLightbox();
-    }
-});
+// Привязка событий закрытия
+if (closeImageViewer) closeImageViewer.onclick = closeLightbox;
 
+imageViewerModal.addEventListener('click', (e) => {
+    // Не закрываем, если нажали на кнопку полного экрана (на всякий случай)
+    if (e.target === imageViewerModal) closeLightbox();
+});
 // ==========================================
 // === РЕНДЕР СООБЩЕНИЙ (ИСПРАВЛЕНО) ===
 // ==========================================
