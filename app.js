@@ -1127,7 +1127,15 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 function initPeer(uid) {
     if (peer) return;
     // Используем UID как PeerID (очищаем от спецсимволов на всякий случай, хотя firebase uid обычно безопасны)
-    peer = new Peer(uid); 
+    peer = new Peer(uid, {
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' }
+            ]
+        }
+    }); 
     
     peer.on('open', (id) => {
         console.log('My Peer ID is: ' + id);
