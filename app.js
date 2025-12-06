@@ -266,20 +266,6 @@ document.getElementById('back-btn').addEventListener('click', () => {
     document.getElementById('chat-title').innerText = "КАНАЛ: НЕ ВЫБРАН"; 
     document.getElementById('messages-area').innerHTML = '<div class="no-chat-selected"><p>> СВЯЗЬ ПРЕРВАНА</p></div>'; 
 });
-    // Скрыть поиск
-if(document.getElementById('btn-toggle-search')) {
-    document.getElementById('btn-toggle-search').style.display = 'none';
-    document.getElementById('chat-search-bar').style.display = 'none';
-    // Функция очистки из нового кода, можно вызвать если переменная доступна
-    // или просто вручную очистить поле
-    document.getElementById('chat-search-input').value = '';
-}
-    if (unsubscribeMessages) unsubscribeMessages(); 
-    currentChatId = null; 
-    document.getElementById('msg-form').style.display = 'none'; 
-    document.getElementById('chat-title').innerText = "КАНАЛ: НЕ ВЫБРАН"; 
-    document.getElementById('messages-area').innerHTML = '<div class="no-chat-selected"><p>> СВЯЗЬ ПРЕРВАНА</p></div>'; 
-});
 
 // ==========================================
 // === СПИСОК ЧАТОВ ===
