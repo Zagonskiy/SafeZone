@@ -1460,44 +1460,68 @@ function endCallLocal() {
     updateMicIcon();
 }
 
-// 8. Управление аудио и таймер
+// ==========================================
+// === ИСПРАВЛЕННАЯ ФУНКЦИЯ АУДИО ===
+// ==========================================
 function setupRemoteAudio(stream) {
-    console.log("🎧 Настройка аудио потока...");
+    console.log("🎧 Попытка воспроизведения аудио...");
     const audioEl = document.getElementById('remote-audio');
     
-    // Сброс srcObject для надежности
-    audioEl.srcObject = null;
+    // 1. Привязываем поток
     audioEl.srcObject = stream;
     
-    // Явно задаем громкость
+    // 2. ВАЖНО: Разрешаем играть на iPhone без полного экрана
+    audioEl.playsInline = true; 
+    audioEl.autoplay = true;
     audioEl.volume = 1.0;
 
-    // Пытаемся воспроизвести
-    const playPromise = audioEl.play();
+    // 3. Проверка треков (иногда они приходят выключенными)
+    stream.getAudioTracks().forEach(track => {
+        track.enabled = true;
+        console.log(`🎤 Трек: ${track.label}, Статус: ${track.readyState}, Enabled: ${track.enabled}`);
+    });
 
-    if (playPromise !== undefined) {
-        playPromise.then(() => {
-            console.log("🔊 Аудио воспроизводится!");
+    // 4. Агрессивный запуск
+    const startPlay = async () => {
+        try {
+            await audioEl.play();
+            console.log("🔊 Аудио успешно запущено!");
             document.getElementById('call-status-text').innerText = "ЗВУК ЕСТЬ";
             document.getElementById('call-status-text').style.color = "#33ff33";
-        }).catch(error => {
-            console.warn("🔇 Автоплей заблокирован браузером. Ждем клика.", error);
-            document.getElementById('call-status-text').innerText = "НАЖМИТЕ НА ЭКРАН";
-            document.getElementById('call-status-text').style.color = "yellow";
-            
-            // Хак: Включаем звук при любом клике по экрану
-            const enableAudio = () => {
-                audioEl.play();
-                document.getElementById('call-status-text').innerText = "В ЭФИРЕ";
-                document.getElementById('call-status-text').style.color = "#33ff33";
-                document.removeEventListener('click', enableAudio);
-                document.removeEventListener('touchstart', enableAudio);
-            };
-            
-            document.addEventListener('click', enableAudio);
-            document.addEventListener('touchstart', enableAudio);
-        });
-    }
+        } catch (err) {
+            console.warn("🔇 Автоплей заблокирован:", err);
+            // Если заблокировано - показываем большую кнопку поверх всего
+            showUnlockButton(audioEl);
+        }
+    };
+
+    startPlay();
+}
+
+// Вспомогательная функция кнопки "ВКЛЮЧИТЬ ЗВУК"
+function showUnlockButton(audioEl) {
+    const btn = document.createElement('button');
+    btn.innerText = "🔇 НЕТ ЗВУКА? НАЖМИ СЮДА!";
+    btn.style.position = "fixed";
+    btn.style.top = "50%";
+    btn.style.left = "50%";
+    btn.style.transform = "translate(-50%, -50%)";
+    btn.style.zIndex = "9999";
+    btn.style.padding = "20px";
+    btn.style.background = "red";
+    btn.style.color = "white";
+    btn.style.fontSize = "18px";
+    btn.style.border = "none";
+    btn.style.borderRadius = "10px";
+    btn.id = "force-audio-btn";
+
+    btn.onclick = () => {
+        audioEl.play();
+        btn.remove();
+        document.getElementById('call-status-text').innerText = "ЗВУК ВКЛЮЧЕН";
+    };
+
+    document.body.appendChild(btn);
 }
 
 document.getElementById('btn-mic-toggle').addEventListener('click', () => {
