@@ -1413,7 +1413,7 @@ async function startVoiceCall(receiverId) {
                 activeCallDocId = null;
                 incomingCallData = null;
             };
-        }
+    
         else if (data.status === "rejected") {
             document.getElementById('call-status-text').innerText = "ОТКЛОНЕНО";
             logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
