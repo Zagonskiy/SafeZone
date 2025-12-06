@@ -909,19 +909,6 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 // let callUnsubscribe = null; // Отписка от прослушивания статуса вызова
 // let localStream = null; // Локальный медиапоток
 
-// --- КОНФИГ СЕТИ (оставлен как есть) ---
-const peerConfig = {
-    debug: 2,
-    secure: true,
-    config: {
-        iceServers: [
-            // ... ваш список серверов ...
-        ],
-        iceTransportPolicy: 'all',
-        iceCandidatePoolSize: 10
-    }
-};
-
 // --- СИСТЕМА ЗВОНКОВ (V3 STABLE - ИСПРАВЛЕНАЯ) ---
 
 let callStatus = 'idle'; // Добавим глобальное состояние вызова для лучшего контроля
