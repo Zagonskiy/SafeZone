@@ -1123,9 +1123,10 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 // === СИСТЕМА ЗВОНКОВ (WEBRTC + FIRESTORE) ===
 // ==========================================
 
-// 1. Инициализация P2P (Улучшенная стабильность)
+// 1. Инициализация P2P (FIXED)
 function initPeer(uid) {
-    if (peer) return;
+    // Если пир уже есть и он ЖИВОЙ - не создаем дубликат
+    if (peer && !peer.destroyed) return;
     
     console.log("🚀 Initializing PeerJS with ID:", uid);
 
@@ -1135,9 +1136,7 @@ function initPeer(uid) {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' }
+                { urls: 'stun:stun2.l.google.com:19302' }
             ]
         }
     }); 
@@ -1152,12 +1151,12 @@ function initPeer(uid) {
         const answerLogic = (stream) => {
             call.answer(stream);
             call.on('stream', (remoteStream) => {
-                console.log("🔊 Stream received!");
                 setupRemoteAudio(remoteStream);
                 startCallTimer();
             });
             call.on('close', () => endCallLocal());
-            call.on('error', (e) => console.error("Call error inside:", e));
+            // Добавляем обработку ошибок внутри звонка
+            call.on('error', (e) => console.error("Call error:", e));
             currentCall = call;
         };
 
@@ -1174,35 +1173,38 @@ function initPeer(uid) {
     });
     
     peer.on('error', (err) => {
-        console.error("🚨 PeerJS Error:", err.type, err);
-        // Если ID занят или сеть отвалилась - пробуем жесткий реконнект
-        if (err.type === 'unavailable-id' || err.type === 'network' || err.type === 'disconnected') {
-            console.log("♻️ Critical Peer Error. Reconnecting in 1s...");
-            setTimeout(() => {
-                if (!peer || peer.destroyed) return;
-                peer.reconnect();
-            }, 1000);
-        }
+        console.error("🚨 PeerJS Error:", err.type);
+        // Не пытаемся реконнектить здесь, чтобы не вызвать циклическую ошибку.
+        // allow ensurePeerConnected to handle it on user action.
     });
 
     peer.on('disconnected', () => {
-        console.log("🔌 Peer disconnected via socket. Reconnecting...");
+        console.log("🔌 Peer disconnected.");
+        // Можно попробовать мягкий реконнект, но с проверкой
         if (peer && !peer.destroyed) {
             peer.reconnect();
         }
     });
 
-    // ХАК: Пингуем сервер каждые 2 секунды, чтобы Telegram/Chrome не убивал сокет
-    setInterval(() => {
+    // ХАК: Пингуем сервер (БЕЗОПАСНАЯ ВЕРСИЯ)
+    // Очищаем предыдущий интервал, если он был, чтобы не плодить их
+    if (window.peerKeepAliveInterval) clearInterval(window.peerKeepAliveInterval);
+    
+    window.peerKeepAliveInterval = setInterval(() => {
+        // Ключевое исправление: проверяем !peer.destroyed перед реконнектом
         if (peer && !peer.destroyed && peer.disconnected) {
             console.log("💓 Force Reconnect (Keep-Alive)...");
             peer.reconnect();
         }
-    }, 2000);
+    }, 5000);
 
-    window.addEventListener('beforeunload', () => {
-        if (peer) peer.destroy();
-    });
+    // Удаляем старый листенер перед добавлением нового (на всякий случай)
+    window.removeEventListener('beforeunload', cleanupPeer);
+    window.addEventListener('beforeunload', cleanupPeer);
+}
+
+function cleanupPeer() {
+    if (peer) peer.destroy();
 }
 // 2. Слушаем Firestore на предмет входящих вызовов
 function listenForIncomingCalls(myUid) {
@@ -1597,53 +1599,67 @@ document.body.addEventListener('touchstart', function() {
     }
 }, { once: true });
 
-// Вспомогательная функция: Гарантирует, что мы подключены к PeerJS
+// Вспомогательная функция: Гарантирует живое соединение (С ЗАЩИТОЙ ОТ DESTROYED)
 function ensurePeerConnected() {
     return new Promise((resolve, reject) => {
-        if (!peer) {
-            reject("Peer объект не существует");
+        // Сценарий 1: Пира нет или он уничтожен — создаем заново
+        if (!peer || peer.destroyed) {
+            console.log("⚠️ Peer уничтожен или отсутствует. Пересоздаю...");
+            
+            // Если старый объект есть, но уничтожен - обнуляем
+            peer = null; 
+            
+            // Запускаем инициализацию заново
+            initPeer(auth.currentUser.uid); 
+            
+            // Ждем, пока новый peer не получит ID и не соединится
+            let attempts = 0;
+            const checkInterval = setInterval(() => {
+                attempts++;
+                // Успех: пир существует, не уничтожен, не отключен и имеет ID
+                if (peer && !peer.destroyed && !peer.disconnected && peer.id) {
+                    clearInterval(checkInterval);
+                    console.log("✅ Новый Peer готов к работе!");
+                    resolve();
+                }
+                // Тайм-аут через 4 секунды
+                if (attempts > 20) {
+                    clearInterval(checkInterval);
+                    reject("Не удалось пересоздать Peer (TimeOut)");
+                }
+            }, 200);
             return;
         }
 
-        if (!peer.disconnected && !peer.destroyed) {
-            console.log("✅ PeerJS уже активен и готов.");
+        // Сценарий 2: Пир жив и подключен — всё ок
+        if (!peer.disconnected) {
             resolve();
             return;
         }
 
-        console.log("⏳ PeerJS отключен. Восстанавливаем соединение...");
-        
-        // Временный слушатель открытия
-        const onOpen = () => {
-            peer.off('open', onOpen);
-            peer.off('error', onError);
-            console.log("✅ PeerJS восстановлен!");
-            resolve();
-        };
-
-        const onError = (err) => {
-            console.warn("⚠️ Ошибка при восстановлении PeerJS:", err);
-            // Даже если ошибка (например ID занят), пробуем продолжить, 
-            // так как peer может пересоздаться
-            // Но лучше здесь не реджектить сразу, а дать шанс ретраю в initPeer
-        };
-
-        peer.on('open', onOpen);
-        peer.on('error', onError);
-
+        // Сценарий 3: Пир жив, но отключен от сокета (спящий режим) — реконнектим
+        console.log("🔌 PeerJS отключен. Пробую reconnect()...");
         peer.reconnect();
 
-        // Тайм-аут на случай, если реконнект зависнет
+        const onOpen = () => {
+            peer.off('open', onOpen);
+            console.log("✅ Reconnect успешен!");
+            resolve();
+        };
+        
+        peer.on('open', onOpen);
+
+        // Страховка от зависания реконнекта
         setTimeout(() => {
-            if (!peer.disconnected) {
-                resolve(); // Успели
+            if (peer && !peer.disconnected) {
+                peer.off('open', onOpen);
+                resolve();
             } else {
-                console.log("⚠️ Тайм-аут реконнекта. Пробуем жесткую перезагрузку Peer...");
-                // Крайний случай: убиваем и создаем заново
-                peer.destroy();
-                initPeer(auth.currentUser.uid);
-                // Даем еще 1 сек и надеемся на лучшее
-                setTimeout(resolve, 1000); 
+                console.log("❌ Reconnect не удался. Принудительное пересоздание.");
+                // Если реконнект не прошел, уничтожаем и рекурсивно вызываем эту же функцию
+                // чтобы она пошла по Сценарию 1
+                if(peer) peer.destroy();
+                ensurePeerConnected().then(resolve).catch(reject);
             }
         }, 2000);
     });
