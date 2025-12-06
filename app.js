@@ -1124,30 +1124,23 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 // ==========================================
 
 // ==========================================
-// === 1. Инициализация P2P (КРИТИЧЕСКИЕ ИСПРАВЛЕНИЯ) ===
+// === 1. Инициализация P2P (ФИНАЛЬНАЯ ВЕРСИЯ) ===
 // ==========================================
 function initPeer(uid) {
-    if (peer) return;
-    
+    if (peer && !peer.destroyed) return; // Если уже есть живой, не пересоздаем
+
     console.log("🚀 Initializing PeerJS with ID:", uid);
 
+    // Убрали host/port/path - библиотека сама найдет лучший сервер
     peer = new Peer(uid, {
-        debug: 2, // ⬅️ Увеличил до 2 для подробных логов
-        
-        // ⬇️ КРИТИЧНО: Укажите свой PeerJS сервер или используйте cloud.peerjs.com
-        host: 'cloud.peerjs.com', 
-        port: 443,
-        path: '/',
-        secure: true,
-        
+        debug: 1, 
         config: {
             iceServers: [
-                // 1️⃣ STUN серверы (быстрые, бесплатные)
+                // Google STUN
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
                 
-                // 2️⃣ TURN серверы Twilio (НАДЁЖНЫЕ, бесплатный тестовый)
+                // Twilio TURN (Ваши рабочие серверы)
                 {
                     urls: 'turn:global.turn.twilio.com:3478?transport=udp',
                     username: 'f4b4035eaa76f4a55de5f4351567653ee4ff6fa97b50b6b334fcc1be9c27212d',
@@ -1162,102 +1155,88 @@ function initPeer(uid) {
                     urls: 'turn:global.turn.twilio.com:443?transport=tcp',
                     username: 'f4b4035eaa76f4a55de5f4351567653ee4ff6fa97b50b6b334fcc1be9c27212d',
                     credential: 'w1uxM55V9yVoqyVFjt+mxDBV0F87AUCemaYVQGxsPLw='
-                },
-                
-                // 3️⃣ Резервные TURN (Metered - более стабильные чем OpenRelay)
-                {
-                    urls: 'turn:a.relay.metered.ca:80',
-                    username: 'e46f89c087d760c60b90091d',
-                    credential: 'uxQK/j48gHfz0pm+'
-                },
-                {
-                    urls: 'turn:a.relay.metered.ca:443',
-                    username: 'e46f89c087d760c60b90091d',
-                    credential: 'uxQK/j48gHfz0pm+'
                 }
             ],
-            iceTransportPolicy: 'all', 
-            iceCandidatePoolSize: 10,
-            bundlePolicy: 'max-bundle', // ⬅️ ДОБАВЛЕНО: оптимизация
-            rtcpMuxPolicy: 'require'    // ⬅️ ДОБАВЛЕНО: обязательное мультиплексирование
+            iceTransportPolicy: 'all',
+            bundlePolicy: 'max-bundle'
         }
     });
-
 
     peer.on('open', (id) => {
         console.log('✅ My Peer ID is active:', id);
     });
 
-    peer.on('call', (call) => {
-    console.log("📞 Incoming P2P call!");
+    // Обработка ошибок соединения
+    peer.on('error', (err) => {
+        console.error("🚨 PeerJS Error:", err.type, err);
+        
+        // Если ID занят (зависла прошлая сессия)
+        if (err.type === 'unavailable-id') {
+            console.warn("⚠️ ID занят. Ждем 2 сек и пробуем снова...");
+            setTimeout(() => {
+                if (peer) peer.destroy();
+                peer = null;
+                initPeer(uid);
+            }, 2000);
+        }
+        // Если потеряли связь с сервером
+        else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
+            console.warn("🔌 Ошибка сети PeerJS. Пробую реконнект...");
+            setTimeout(() => {
+                if (peer && !peer.destroyed) {
+                    peer.reconnect();
+                } else {
+                    initPeer(uid);
+                }
+            }, 3000);
+        }
+    });
 
-    // Добавить внутрь initPeer
+    // Обработка отключения
     peer.on('disconnected', () => {
-        console.warn("🔌 PeerJS disconnected. Auto-reconnecting...");
-        // Пытаемся переподключиться к серверу
-        peer.reconnect();
+        console.warn("🔌 PeerJS disconnected.");
+        // Пытаемся восстановить связь, если ID не уничтожен
+        if (peer && !peer.destroyed) {
+            peer.reconnect();
+        }
     });
 
-    peer.on('close', () => {
-         console.warn("💀 PeerJS closed completely.");
-         peer = null;
-    });
-    
-    const answerLogic = (stream) => {
-        // ⬇️ ДОБАВЛЕНО: Явные constraints при ответе
-        call.answer(stream);
+    // Входящий звонок
+    peer.on('call', (call) => {
+        console.log("📞 Incoming P2P call!");
         
-        console.log("📡 Отправил ответ с аудио потоком");
-        
-        call.on('stream', (remoteStream) => {
-            console.log("✅ Получил удалённый поток от звонящего");
+        // Логика ответа
+        const answerLogic = (stream) => {
+            call.answer(stream);
             
-            // ⬇️ ДОБАВЛЕНО: Проверка треков
-            const audioTracks = remoteStream.getAudioTracks();
-            console.log(`🎤 Треков в ответе: ${audioTracks.length}`);
+            call.on('stream', (remoteStream) => {
+                console.log("✅ Stream received");
+                setupRemoteAudio(remoteStream);
+                startCallTimer();
+            });
             
-            setupRemoteAudio(remoteStream);
-            startCallTimer();
-        });
-        
-        // ⬇️ ДОБАВЛЕНО: Мониторинг ICE
-        call.peerConnection.oniceconnectionstatechange = () => {
-            console.log(`🧊 [ANSWER] ICE State: ${call.peerConnection.iceConnectionState}`);
+            call.on('close', () => endCallLocal());
+            currentCall = call;
         };
-        
-        call.on('close', () => {
-            console.log("📴 Звонок закрыт");
-            endCallLocal();
-        });
-        
-        currentCall = call;
-    };
-    
-    if (localStream) {
-        console.log("🎤 Используем существующий поток");
-        answerLogic(localStream);
-    } else {
-        console.log("🎤 Запрашиваем новый поток...");
-        navigator.mediaDevices.getUserMedia({ 
-            audio: {
-                echoCancellation: true,  // ⬅️ ДОБАВЛЕНО
-                noiseSuppression: true,  // ⬅️ ДОБАВЛЕНО
-                autoGainControl: true    // ⬅️ ДОБАВЛЕНО
-            } 
-        })
-        .then((s) => {
-            localStream = s;
-            console.log("✅ Получил поток с микрофона");
-            answerLogic(s);
-        })
-        .catch(e => {
-            console.error("❌ Ошибка микрофона:", e);
-            alert("Не могу получить доступ к микрофону: " + e.message);
-        });
-    }
-});
-}
 
+        if (localStream) {
+            answerLogic(localStream);
+        } else {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then((s) => {
+                    localStream = s;
+                    answerLogic(s);
+                })
+                .catch(e => console.error(e));
+        }
+    });
+
+    // ВАЖНО: Очистка ID при закрытии вкладки
+    // Это предотвращает ошибку "unavailable-id" при перезагрузке
+    window.addEventListener('beforeunload', () => {
+        if (peer) peer.destroy();
+    });
+}
 // 2. Слушаем Firestore на предмет входящих вызовов
 function listenForIncomingCalls(myUid) {
     const q = query(
