@@ -666,6 +666,176 @@ imageViewerModal.addEventListener('click', (e) => {
         closeLightbox();
     }
 });
+
+// ==========================================
+// === РЕНДЕР СООБЩЕНИЙ (ИСПРАВЛЕНО) ===
+// ==========================================
+function renderMessage(docSnap) {
+    const msg = docSnap.data();
+    const isMine = msg.senderId === auth.currentUser.uid;
+    
+    // 1. Контейнер строки
+    const row = document.createElement('div');
+    row.className = `msg-row ${isMine ? 'my' : 'other'}`;
+
+    // 2. Аватар (только для чужих)
+    if (!isMine) {
+        const avatar = document.createElement('img');
+        avatar.className = 'chat-avatar';
+        
+        if (currentChatPartnerAvatar) {
+            avatar.src = currentChatPartnerAvatar;
+        } else if (msg.senderAvatar) {
+            avatar.src = msg.senderAvatar;
+        } else {
+            avatar.src = DEFAULT_AVATAR;
+        }
+        
+        avatar.onclick = () => openProfile(msg.senderId, false);
+        row.appendChild(avatar);
+    }
+
+    // 3. Пузырь сообщения
+    const div = document.createElement('div');
+    div.className = `msg ${isMine ? 'my' : 'other'}`;
+    
+    // Имя над сообщением (для чужих)
+    if (!isMine) {
+        const nickSpan = document.createElement('div');
+        nickSpan.innerText = msg.senderNick;
+        nickSpan.style.fontSize = '0.7rem'; 
+        nickSpan.style.marginBottom = '2px'; 
+        nickSpan.style.color = '#888'; 
+        nickSpan.style.cursor = 'pointer';
+        nickSpan.onclick = () => openProfile(msg.senderId, false);
+        div.appendChild(nickSpan);
+    }
+
+    // 4. Контент (Видео / Аудио / Фото / Текст)
+    const contentDiv = document.createElement('div');
+    
+    if (msg.audioBase64) {
+        // --- АУДИО ---
+        const audioWrapper = document.createElement('div');
+        audioWrapper.className = 'audio-player-wrapper';
+        const audio = document.createElement('audio');
+        audio.controls = true; 
+        audio.src = msg.audioBase64;
+        audioWrapper.appendChild(audio);
+        contentDiv.appendChild(audioWrapper);
+
+    } else if (msg.type === 'video' && msg.isChunked) {
+        // --- ВИДЕО ---
+        const videoContainer = document.createElement('div');
+        videoContainer.className = 'video-msg-container';
+        
+        const thumbSrc = msg.videoThumbnail || DEFAULT_AVATAR; 
+        videoContainer.innerHTML = `<img src="${thumbSrc}" class="msg-video-thumb"><div class="play-icon-overlay"></div>`;
+        
+        videoContainer.onclick = async () => {
+            if (videoContainer.dataset.blobUrl) {
+                viewMedia('video', videoContainer.dataset.blobUrl, msg.text);
+                return;
+            }
+            const playIcon = videoContainer.querySelector('.play-icon-overlay');
+            playIcon.style.border = "2px dashed yellow";
+            
+            try {
+                const videoBlob = await loadVideoFromChunks(docSnap.id, msg.mimeType);
+                if (videoBlob) {
+                    const vidUrl = URL.createObjectURL(videoBlob);
+                    videoContainer.dataset.blobUrl = vidUrl; 
+                    viewMedia('video', vidUrl, msg.text);
+                    playIcon.style.border = "2px solid #fff";
+                } else {
+                    alert("ОШИБКА ВИДЕО");
+                }
+            } catch (e) {
+                alert("СБОЙ СЕТИ");
+            }
+        };
+        contentDiv.appendChild(videoContainer);
+        
+        if(msg.text && msg.text !== "[ВИДЕО]") {
+            const caption = document.createElement('div');
+            caption.innerText = msg.text; 
+            caption.style.marginTop = "5px";
+            contentDiv.appendChild(caption);
+        }
+
+    } else if (msg.imageBase64 || msg.type === 'image') {
+        // --- ФОТО ---
+        const img = document.createElement('img');
+        img.src = msg.imageBase64; 
+        img.className = 'msg-image-content';
+        img.onclick = () => viewMedia('image', msg.imageBase64, msg.text);
+        contentDiv.appendChild(img);
+        
+        if(msg.text && msg.text !== "[ФОТО]") {
+            const caption = document.createElement('div');
+            caption.innerText = msg.text; 
+            caption.style.marginTop = "5px";
+            contentDiv.appendChild(caption);
+        }
+    } else {
+        // --- ТЕКСТ ---
+        contentDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
+    }
+    
+    div.appendChild(contentDiv);
+
+    // 5. Мета-данные (Время, Ред, Удалить, Статус)
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'msg-meta';
+    
+    if (isMine && !msg.imageBase64 && !msg.audioBase64 && !msg.videoBase64 && msg.type !== 'video') {
+        const editBtn = document.createElement('span');
+        editBtn.innerText = '[E]'; 
+        editBtn.style.cursor = 'pointer'; 
+        editBtn.style.marginRight = '5px';
+        editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
+        metaDiv.appendChild(editBtn);
+    }
+    if (isMine) {
+        const delBtn = document.createElement('span');
+        delBtn.innerText = '[X]'; 
+        delBtn.style.cursor = 'pointer'; 
+        delBtn.style.marginRight = '5px';
+        delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id);
+        metaDiv.appendChild(delBtn);
+    }
+
+    const timeSpan = document.createElement('span');
+    const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
+    timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+    metaDiv.appendChild(timeSpan);
+
+    if (isMine) {
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'msg-status';
+        if (docSnap.metadata.hasPendingWrites) {
+            statusSpan.innerHTML = '🕒'; 
+            statusSpan.className += ' status-wait';
+        } else if (msg.read) {
+            statusSpan.innerHTML = '✓✓'; 
+            statusSpan.className += ' status-read';
+        } else {
+            statusSpan.innerHTML = '✓'; 
+            statusSpan.className += ' status-sent';
+        }
+        metaDiv.appendChild(statusSpan);
+    }
+
+    div.appendChild(metaDiv);
+    row.appendChild(div);
+    
+    // 6. ВАЖНО: ДОБАВЛЕНИЕ В HTML
+    const messagesArea = document.getElementById('messages-area');
+    if (messagesArea) {
+        messagesArea.appendChild(row);
+    }
+}
+
 // ==========================================
 // === ПРОФИЛЬ, ПОИСК, УДАЛЕНИЕ ===
 // ==========================================
