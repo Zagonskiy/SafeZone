@@ -49,13 +49,21 @@ let callTimerInterval = null;
 let callSeconds = 0;
 let callUnsubscribe = null;
 
-// Конфиг PeerJS (TURN серверы для работы через 4G)
+// --- ОБНОВЛЕННЫЙ КОНФИГ СЕТИ (БОЛЬШЕ СЕРВЕРОВ) ---
 const peerConfig = {
-    debug: 1,
+    debug: 2, // Показывает предупреждения
+    secure: true, // ВАЖНО: Принудительный HTTPS для сокетов
     config: {
         iceServers: [
+            // Google STUN (Стандарт)
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            
+            // Twilio STUN (Резерв)
+            { urls: 'stun:global.stun.twilio.com:3478' },
+
+            // OpenRelay TURN (Для обхода NAT/4G)
             {
                 urls: "turn:openrelay.metered.ca:80",
                 username: "openrelayproject",
@@ -71,7 +79,9 @@ const peerConfig = {
                 username: "openrelayproject",
                 credential: "openrelayproject"
             }
-        ]
+        ],
+        iceTransportPolicy: 'all', // Разрешить все типы соединений
+        iceCandidatePoolSize: 10   // Заранее искать маршруты
     }
 };
 
@@ -920,32 +930,83 @@ async function getMediaStream() {
     }
 }
 
-// Создаем НОВЫЙ Peer для каждого соединения (решает проблему зомби-сессий)
+// --- УЛУЧШЕННОЕ СОЗДАНИЕ PEER ---
 function createPeer() {
     return new Promise((resolve, reject) => {
         if (peer) peer.destroy();
+        
+        // Создаем Peer
         peer = new Peer(peerConfig);
-        peer.on('open', (id) => { console.log('✅ Fresh Peer ID:', id); resolve(id); });
-        peer.on('error', (err) => { console.error("Peer Error:", err); });
+
+        // Таймаут: если ID не дали за 5 секунд - перезапуск
+        const timeout = setTimeout(() => {
+            if(peer && !peer.id) {
+                console.warn("⚠️ PeerJS timeout. Retrying...");
+                peer.destroy();
+                resolve(createPeer()); // Рекурсивный перезапуск
+            }
+        }, 5000);
+
+        peer.on('open', (id) => {
+            clearTimeout(timeout);
+            console.log('✅ Fresh Peer ID:', id);
+            resolve(id);
+        });
+
+        peer.on('error', (err) => {
+            clearTimeout(timeout);
+            console.error("Peer Error:", err.type);
+            // Если фатальная ошибка сети, пробуем пересоздать через 2 сек
+            if (err.type === 'network' || err.type === 'disconnected') {
+                 setTimeout(() => resolve(createPeer()), 2000);
+            }
+        });
+
         peer.on('call', (call) => {
             console.log("⚡ Incoming P2P Connection");
-            if (localStream) { call.answer(localStream); setupCallEvents(call); }
+            if (localStream) {
+                call.answer(localStream);
+                setupCallEvents(call);
+            }
         });
     });
 }
 
 function setupCallEvents(call) {
     currentCall = call;
+    
+    // ВАЖНО: Если соединение уже открыто, не ждем stream
+    if (call.open) {
+        console.log("✅ Call Connection Open");
+    }
+
     call.on('stream', (remoteStream) => {
         console.log("🎧 Stream Received");
+        
         const audioEl = document.getElementById('remote-audio');
-        if (audioEl) { audioEl.srcObject = remoteStream; audioEl.play().catch(e => console.error("Play error:", e)); }
+        if (audioEl) {
+            audioEl.srcObject = remoteStream;
+            // Попытка воспроизведения с обработкой Promise
+            const playPromise = audioEl.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(e => {
+                    console.warn("Autoplay prevented. Waiting for interaction.", e);
+                    // Визуально просим нажать
+                    document.getElementById('call-status-text').innerText = "НАЖМИТЕ ЭКРАН!";
+                });
+            }
+        }
+        
         startCallTimer();
         document.getElementById('call-status-text').innerText = "В ЭФИРЕ";
         document.getElementById('call-status-text').style.color = "#33ff33";
     });
+
     call.on('close', () => endCallLocal());
-    call.on('error', () => endCallLocal());
+    call.on('error', (err) => {
+        console.error("Call Stream Error:", err);
+        endCallLocal();
+    });
 }
 
 // --- КНОПКА ПОЗВОНИТЬ ---
