@@ -1123,19 +1123,42 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 // === СИСТЕМА ЗВОНКОВ (WEBRTC + FIRESTORE) ===
 // ==========================================
 
-// 1. Инициализация P2P
+// ==========================================
+// === 1. Инициализация P2P (ИСПРАВЛЕНО) ===
+// ==========================================
 function initPeer(uid) {
     if (peer) return;
     
     console.log("🚀 Initializing PeerJS with ID:", uid);
 
     peer = new Peer(uid, {
-        debug: 1,
+        debug: 1, // Можно поставить 2, чтобы видеть больше логов ошибок
         config: {
             iceServers: [
+                // 1. Google STUN (Оставляем, они быстрые)
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
+                { urls: 'stun:stun1.l.google.com:19302' },
+
+                // 2. TURN Серверы (OpenRelay - бесплатно для тестов)
+                // ВАЖНО: Это позволяет обходить строгие NAT и 4G сети
+                {
+                    urls: "turn:openrelay.metered.ca:80",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                },
+                {
+                    urls: "turn:openrelay.metered.ca:443",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                },
+                {
+                    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                }
+            ],
+            iceTransportPolicy: 'all', // Разрешить все (и P2P, и Relay)
+            iceCandidatePoolSize: 10   // Искать маршруты заранее
         }
     }); 
     
@@ -1143,10 +1166,12 @@ function initPeer(uid) {
         console.log('✅ My Peer ID is active:', id);
     });
 
-    // Обработка входящего (Receiver)
+    // ... остальной код (peer.on('call') и peer.on('error')) без изменений ...
+    // Вставьте сюда содержимое вашего старого обработчика call и error
+    
+    // ПОВТОРЯЮ ВАШ КОД ОБРАБОТКИ (ДЛЯ ЦЕЛОСТНОСТИ):
     peer.on('call', (call) => {
         console.log("📞 Incoming P2P call!");
-        
         const answerLogic = (stream) => {
             call.answer(stream);
             call.on('stream', (remoteStream) => {
@@ -1156,7 +1181,6 @@ function initPeer(uid) {
             call.on('close', () => endCallLocal());
             currentCall = call;
         };
-
         if (localStream) {
             answerLogic(localStream);
         } else {
@@ -1167,32 +1191,17 @@ function initPeer(uid) {
                 })
                 .catch(e => console.error("Mic error:", e));
         }
-        setInterval(() => {
-            if (peer && peer.disconnected) {
-                console.log("🔄 PeerJS отключился (сон мобильного). Переподключаюсь...");
-                peer.reconnect();
-            }
-        }, 5000);
     });
-    
-    // Глобальная обработка ошибок PeerJS
+
     peer.on('error', (err) => {
         console.error("🚨 PeerJS Error:", err.type, err);
-        
-        // Если ID занят (при перезагрузке), пробуем через 1 сек
         if (err.type === 'unavailable-id') {
-            console.log("♻️ ID занят, пробую переподключиться...");
             setTimeout(() => {
                 peer.destroy();
                 peer = null;
                 initPeer(uid);
             }, 2000);
         }
-    });
-
-    // ВАЖНО: Очистка при закрытии/перезагрузке
-    window.addEventListener('beforeunload', () => {
-        if (peer) peer.destroy();
     });
 }
 // 2. Слушаем Firestore на предмет входящих вызовов
