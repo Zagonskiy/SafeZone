@@ -22,7 +22,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
+// Глобальные переменные
 let currentChatId = null;
 let unsubscribeMessages = null; 
 let unsubscribeChats = null; 
@@ -31,7 +31,7 @@ let searchTimeout = null;
 let profileToEdit = null; 
 let currentChatPartnerAvatar = null; 
 
-// Аудио сообщения
+// Переменные для записи аудио
 let mediaRecorder = null;
 let audioChunks = [];
 let recStartTimePress = 0;
@@ -39,52 +39,17 @@ let isRecording = false;
 let isLockedMode = false;
 let detectedMimeType = '';
 
-// Звонки (Глобальные)
-let localStream = null;
-let currentCall = null;
+// --- ЗВОНКИ ---
 let peer = null;
-let activeCallDocId = null;
-let incomingCallData = null;
+let currentCall = null;
+let localStream = null;
+let incomingCallData = null; // Данные из Firestore о входящем
+let activeCallDocId = null; // ID документа звонка в Firestore
 let callTimerInterval = null;
 let callSeconds = 0;
-let callUnsubscribe = null;
+let isMicMuted = false;
 
-// --- ОБНОВЛЕННЫЙ КОНФИГ СЕТИ (БОЛЬШЕ СЕРВЕРОВ) ---
-const peerConfig = {
-    debug: 2, // Показывает предупреждения
-    secure: true, // ВАЖНО: Принудительный HTTPS для сокетов
-    config: {
-        iceServers: [
-            // Google STUN (Стандарт)
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            
-            // Twilio STUN (Резерв)
-            { urls: 'stun:global.stun.twilio.com:3478' },
-
-            // OpenRelay TURN (Для обхода NAT/4G)
-            {
-                urls: "turn:openrelay.metered.ca:80",
-                username: "openrelayproject",
-                credential: "openrelayproject"
-            },
-            {
-                urls: "turn:openrelay.metered.ca:443",
-                username: "openrelayproject",
-                credential: "openrelayproject"
-            },
-            {
-                urls: "turn:openrelay.metered.ca:443?transport=tcp",
-                username: "openrelayproject",
-                credential: "openrelayproject"
-            }
-        ],
-        iceTransportPolicy: 'all', // Разрешить все типы соединений
-        iceCandidatePoolSize: 10   // Заранее искать маршруты
-    }
-};
-
+// Дефолт аватар
 const DEFAULT_AVATAR = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2333ff33' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='100%25' height='100%25' fill='%23111'/%3E%3Cpath d='M12 2C9 2 7 3.5 7 6v1c0 .5-.5 1-1 1s-1 .5-1 1v2c0 1.5 1 2.5 3 3'/%3E%3Cpath d='M12 2c3 0 5 1.5 5 4v1c0 .5.5 1 1 1s1 .5 1 1v2c0 1.5-1 2.5-3 3'/%3E%3Cpath d='M16 11c0 2.5-1.5 4-4 4s-4-1.5-4-4'/%3E%3Cpath d='M4 22v-2c0-2.5 2-4 4-5'/%3E%3Cpath d='M20 22v-2c0-2.5-2-4-4-5'/%3E%3Cpath d='M8 4h8'/%3E%3C/svg%3E";
 
 // --- DOM ЭЛЕМЕНТЫ ---
@@ -95,7 +60,7 @@ const userDisplay = document.getElementById('user-display');
 const myMiniAvatar = document.getElementById('my-mini-avatar');
 const fullscreenBtn = document.getElementById('fullscreen-btn');
 
-// Чат
+// Чат элементы
 const msgInput = document.getElementById('msg-input');
 const btnSendText = document.getElementById('btn-send-text'); 
 const btnMicRec = document.getElementById('btn-mic-rec');     
@@ -137,6 +102,7 @@ const modalBtnCancel = document.getElementById('modal-btn-cancel');
 
 // Удаление чата
 const deleteChatModal = document.getElementById('delete-chat-modal');
+let chatToDeleteId = null;
 
 // Превью медиа
 const photoModal = document.getElementById('photo-preview-modal');
@@ -145,15 +111,7 @@ const videoPreviewEl = document.getElementById('video-preview-el');
 const photoCaptionInput = document.getElementById('photo-caption-input');
 const btnCancelPhoto = document.getElementById('btn-cancel-photo');
 const btnConfirmPhoto = document.getElementById('btn-confirm-photo');
-
-// Поиск в чате
-const btnToggleSearch = document.getElementById('btn-toggle-search');
-const searchBar = document.getElementById('chat-search-bar');
-const searchInputChat = document.getElementById('chat-search-input');
-const btnSearchUp = document.getElementById('btn-search-up');
-const btnSearchDown = document.getElementById('btn-search-down');
-const btnCloseSearch = document.getElementById('btn-close-search');
-const searchCountLabel = document.getElementById('search-count');
+let selectedFile = null;
 
 // --- UTILS ---
 function showModal(text, type = 'alert', placeholder = '') {
@@ -177,58 +135,22 @@ function showModal(text, type = 'alert', placeholder = '') {
     });
 }
 
-
-// --- ФУНКЦИЯ ПОКАЗА ВХОДЯЩЕГО ЗВОНКА ---
-function showIncomingCallModal(docId, data) {
-    console.log("🔔 Входящий звонок от:", data.callerName);
-
-    // 1. Сохраняем данные о вызове в глобальные переменные
-    // Это критически важно, чтобы кнопки "Ответить" и "Отклонить" знали, с чем работать
-    activeCallDocId = docId;
-    incomingCallData = data;
-
-    // 2. Заполняем интерфейс (DOM)
-    const modal = document.getElementById('incoming-call-modal');
-    
-    // Убедитесь, что в вашем HTML есть элемент для имени звонящего внутри модального окна
-    // Я использую ID 'incoming-caller-name', проверьте свой HTML
-    const nameEl = document.getElementById('incoming-caller-name'); 
-    
-    // Если есть аватарка входящего звонка
-    const avatarEl = document.getElementById('incoming-caller-avatar');
-
-    if (nameEl) {
-        nameEl.innerText = data.callerName || "Неизвестный боец";
-    }
-    
-    if (avatarEl) {
-        avatarEl.src = data.callerAvatar || DEFAULT_AVATAR;
-    }
-
-    // 3. Показываем модальное окно
-    if (modal) {
-        modal.classList.add('active');
-    } else {
-        console.error("❌ Ошибка: Элемент 'incoming-call-modal' не найден в HTML");
-    }
-}
-
 // ==========================================
-// === 1. ГЛАВНЫЙ КОНТРОЛЛЕР ВХОДА (ИЗОЛИРОВАННЫЙ) ===
+// === ГЛАВНЫЙ КОНТРОЛЛЕР ВХОДА (САМОЛЕЧЕНИЕ) ===
 // ==========================================
 onAuthStateChanged(auth, async (user) => {
     if (user) {
         authScreen.classList.remove('active');
         appInterface.classList.remove('hidden');
         
-        // ШАГ 1: ЗАГРУЗКА ПРОФИЛЯ (Критическая секция)
-        // Оборачиваем в try-catch только загрузку данных, чтобы звонки не влияли
         try {
             const userDoc = await getDoc(doc(db, "users", user.uid));
             
             if (userDoc.exists()) {
+                // Если профиль есть - грузим
                 currentUserData = { uid: user.uid, ...userDoc.data() };
             } else {
+                // ЕСЛИ ПРОФИЛЯ НЕТ (БАГ "UNKNOWN") -> СОЗДАЕМ АВТОМАТИЧЕСКИ
                 console.log("Профиль не найден. Создаю новый...");
                 const newProfile = { 
                     nickname: "Soldier-" + user.uid.slice(0, 4), 
@@ -243,33 +165,18 @@ onAuthStateChanged(auth, async (user) => {
             
             updateMyDisplay();
             loadMyChats();
+            // Внутри onAuthStateChanged, после loadMyChats();
+            initPeer(user.uid);
+            listenForIncomingCalls(user.uid);
             
         } catch (e) {
-            console.error("Critical Profile Error:", e);
-            showModal("ОШИБКА ЗАГРУЗКИ ПРОФИЛЯ. ОБНОВИТЕ СТРАНИЦУ.", "alert");
-            return; // STOP! Дальше не идем
+            console.error("Critical Auth Error:", e);
+            showModal("СБОЙ СИСТЕМЫ ПРИ ЗАГРУЗКЕ ПРОФИЛЯ", "alert");
         }
-        
-        // ШАГ 2: ИНИЦИАЛИЗАЦИЯ ЗВОНКОВ (Второстепенная секция)
-        // Запускаем отдельно. Если упадет - чат продолжит работать.
-        try {
-            if (navigator.mediaDevices && window.Peer) {
-                console.log("🚀 Init Call System...");
-                initIncomingCallListener(user.uid);
-            } else {
-                console.warn("WebRTC не поддерживается в этом окружении");
-            }
-        } catch (callErr) {
-            console.error("Call System Error (Ignored):", callErr);
-        }
-
     } else {
-        // LOGOUT
         appInterface.classList.add('hidden');
         authScreen.classList.add('active');
         currentUserData = null;
-        if (peer) peer.destroy();
-        if (callUnsubscribe) callUnsubscribe();
     }
 });
 
@@ -286,7 +193,7 @@ function updateMyDisplay() {
 }
 
 // ==========================================
-// === 2. ЛОГИКА АВТОРИЗАЦИИ ===
+// === ВХОД И РЕГИСТРАЦИЯ ===
 // ==========================================
 document.getElementById('login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -320,15 +227,17 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
         if (!(await getDocs(q)).empty) throw new Error("ПОЗЫВНОЙ ЗАНЯТ");
         
         const cred = await createUserWithEmailAndPassword(auth, email, pass);
+        // Сразу создаем профиль
         const newData = { nickname: nick, email, createdAt: new Date(), avatarBase64: null, description: "" };
         await setDoc(doc(db, "users", cred.user.uid), newData);
         currentUserData = { uid: cred.user.uid, ...newData };
         
-        updateMyDisplay();
+        updateMyDisplay(); // Обновляем сразу
         
     } catch (err) { showModal(err.message, 'alert'); }
 });
 
+// Навигация
 document.getElementById('logout-btn').addEventListener('click', () => signOut(auth));
 document.getElementById('to-register').addEventListener('click', () => { 
     document.getElementById('login-form').style.display = 'none'; 
@@ -338,16 +247,38 @@ document.getElementById('to-login').addEventListener('click', () => {
     document.getElementById('login-form').style.display = 'block'; 
     document.getElementById('register-form').style.display = 'none'; 
 });
+document.getElementById('back-btn').addEventListener('click', () => { 
+    chatPanel.classList.remove('open');
+
+    // Скрыть кнопку звонка при выходе
+    if(btnCall) btnCall.style.display = 'none'; 
+
+    // Скрыть поиск
+    if(document.getElementById('btn-toggle-search')) {
+        document.getElementById('btn-toggle-search').style.display = 'none';
+        document.getElementById('chat-search-bar').style.display = 'none';
+        document.getElementById('chat-search-input').value = '';
+    }
+    // ... остальной код (unsubscribeMessages и т.д.) ...
+    if (unsubscribeMessages) unsubscribeMessages(); 
+    currentChatId = null; 
+    document.getElementById('msg-form').style.display = 'none'; 
+    document.getElementById('chat-title').innerText = "КАНАЛ: НЕ ВЫБРАН"; 
+    document.getElementById('messages-area').innerHTML = '<div class="no-chat-selected"><p>> СВЯЗЬ ПРЕРВАНА</p></div>'; 
+});
 
 // ==========================================
-// === 3. ЛОГИКА ЧАТОВ ===
+// === СПИСОК ЧАТОВ ===
 // ==========================================
 function loadMyChats() {
     if (!auth.currentUser || !currentUserData) return;
+    
     const q = query(collection(db, "chats"), where("participants", "array-contains", auth.currentUser.uid), orderBy("lastUpdated", "desc"));
+    
     unsubscribeChats = onSnapshot(q, (snap) => {
         const container = document.getElementById('chats-container');
         container.innerHTML = '';
+        
         const visibleChats = snap.docs.filter(doc => {
             const data = doc.data();
             return !data.hiddenFor || !data.hiddenFor.includes(auth.currentUser.uid);
@@ -361,16 +292,20 @@ function loadMyChats() {
                 const data = docSnap.data();
                 const otherUid = data.participants.find(uid => uid !== auth.currentUser.uid);
                 const otherName = data.participantNames.find(n => n !== currentUserData.nickname) || "UNKNOWN";
+                
                 const el = document.createElement('div');
                 el.className = 'chat-item'; 
                 const imgId = `avatar-chat-${docSnap.id}`;
+                
                 el.innerHTML = `
                     <img id="${imgId}" src="${DEFAULT_AVATAR}" class="chat-list-avatar">
                     <div style="flex:1;">${otherName}</div>
                     <button class="btn-trash" onclick="event.stopPropagation(); confirmDeleteChat('${docSnap.id}')">×</button>
                 `;
+                
                 el.onclick = () => openChat(docSnap.id, otherName);
                 container.appendChild(el);
+
                 if (otherUid) {
                     const userSnap = await getDoc(doc(db, "users", otherUid));
                     if (userSnap.exists()) {
@@ -384,20 +319,9 @@ function loadMyChats() {
     });
 }
 
-document.getElementById('back-btn').addEventListener('click', () => { 
-    chatPanel.classList.remove('open');
-    if(btnCall) btnCall.style.display = 'none'; 
-    if(btnToggleSearch) {
-        btnToggleSearch.style.display = 'none';
-        searchBar.style.display = 'none';
-    }
-    if (unsubscribeMessages) unsubscribeMessages(); 
-    currentChatId = null; 
-    document.getElementById('msg-form').style.display = 'none'; 
-    document.getElementById('chat-title').innerText = "КАНАЛ: НЕ ВЫБРАН"; 
-    document.getElementById('messages-area').innerHTML = '<div class="no-chat-selected"><p>> СВЯЗЬ ПРЕРВАНА</p></div>'; 
-});
-
+// ==========================================
+// === ОТКРЫТИЕ ЧАТА ===
+// ==========================================
 async function openChat(chatId, chatName) {
     currentChatId = chatId;
     currentChatPartnerAvatar = null;
@@ -406,10 +330,19 @@ async function openChat(chatId, chatName) {
     document.getElementById('chat-title').innerText = `КАНАЛ: ${chatName}`;
     document.getElementById('msg-form').style.display = 'flex'; 
     document.getElementById('messages-area').innerHTML = ''; 
+    
     chatPanel.classList.add('open');
     
+    // Показать кнопку звонка
     if(btnCall) btnCall.style.display = 'flex';
-    if(btnToggleSearch) btnToggleSearch.style.display = 'block';
+    
+    // Показать кнопку поиска
+    if(document.getElementById('btn-toggle-search')) {
+        document.getElementById('btn-toggle-search').style.display = 'block';
+    }
+if(document.getElementById('btn-toggle-search')) {
+    document.getElementById('btn-toggle-search').style.display = 'block';
+}
     if(searchInput) searchInput.blur(); 
 
     try {
@@ -436,6 +369,7 @@ async function openChat(chatId, chatName) {
     unsubscribeMessages = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
         const area = document.getElementById('messages-area');
         area.innerHTML = '';
+        
         snap.forEach((docSnap) => {
             const msg = docSnap.data();
             if (myClearedAt && msg.createdAt && msg.createdAt.toMillis() <= myClearedAt.toMillis()) return;
@@ -444,14 +378,14 @@ async function openChat(chatId, chatName) {
             }
             renderMessage(docSnap);
         });
+        
         setTimeout(() => { area.scrollTop = area.scrollHeight; }, 50);
     });
 }
 
 // ==========================================
-// === 4. СООБЩЕНИЯ И МЕДИА ===
+// === ЛОГИКА ОТПРАВКИ И ЗАПИСИ ===
 // ==========================================
-// (Обработчики ввода и отправки)
 if (msgInput) {
     msgInput.addEventListener('input', () => {
         const text = msgInput.value.trim();
@@ -469,37 +403,51 @@ document.getElementById('msg-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = msgInput.value.trim();
     if (!text || !currentChatId) return;
+    
     await addDoc(collection(db, "chats", currentChatId, "messages"), {
         text, 
         senderId: auth.currentUser.uid, 
         senderNick: currentUserData.nickname,
         senderAvatar: currentUserData.avatarBase64 || null, 
         createdAt: serverTimestamp(), 
-        edited: false, read: false
+        edited: false,
+        read: false
     });
-    await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp(), hiddenFor: [] });
+    
+    await updateDoc(doc(db, "chats", currentChatId), { 
+        lastUpdated: serverTimestamp(),
+        hiddenFor: [] 
+    });
+    
     msgInput.value = '';
-    btnSendText.style.display = 'none'; btnMicRec.style.display = 'flex';
+    btnSendText.style.display = 'none';
+    btnMicRec.style.display = 'flex';
 });
 
-// === ЗАПИСЬ ГОЛОСОВОГО ===
+// ГИБРИДНАЯ ЗАПИСЬ
 const startRecording = async (e) => {
     if(e.type === 'touchstart') e.preventDefault();
-    if (isRecording) { if (isLockedMode) stopAndSend(); return; }
+    if (isRecording) {
+        if (isLockedMode) stopAndSend();
+        return;
+    }
     recStartTimePress = Date.now();
-    if (!navigator.mediaDevices) return alert("Микрофон недоступен");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return alert("Микрофон недоступен");
 
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaRecorder = new MediaRecorder(stream);
         detectedMimeType = mediaRecorder.mimeType; 
         audioChunks = [];
+
         mediaRecorder.ondataavailable = (event) => { if (event.data.size > 0) audioChunks.push(event.data); };
+
         mediaRecorder.onstop = async () => {
             mediaRecorder.stream.getTracks().forEach(track => track.stop());
             const finalType = detectedMimeType || 'audio/mp4'; 
             const audioBlob = new Blob(audioChunks, { type: finalType });
             if (audioBlob.size < 500) return; 
+
             const reader = new FileReader();
             reader.readAsDataURL(audioBlob);
             reader.onloadend = async () => {
@@ -515,9 +463,13 @@ const startRecording = async (e) => {
                 } catch (e) { showModal("СБОЙ ОТПРАВКИ", "alert"); }
             };
         };
+
         mediaRecorder.start(100); 
         isRecording = true; isLockedMode = false;
-        if(recordingOverlay) { recordingOverlay.style.display = 'flex'; document.getElementById('rec-status-text').innerText = "ЗАПИСЬ..."; }
+        if(recordingOverlay) {
+            recordingOverlay.style.display = 'flex';
+            document.getElementById('rec-status-text').innerText = "ЗАПИСЬ...";
+        }
     } catch (err) { console.error("Mic Error:", err); }
 };
 
@@ -525,6 +477,7 @@ const handleRelease = (e) => {
     if (e.type === 'touchend') e.preventDefault();
     if (!isRecording) return;
     const pressDuration = Date.now() - recStartTimePress;
+    
     if (pressDuration < 500 && !isLockedMode) {
         isLockedMode = true;
         document.getElementById('rec-status-text').innerText = "НАЖМИТЕ ДЛЯ ОТПРАВКИ";
@@ -549,8 +502,11 @@ if (btnMicRec) {
     btnMicRec.addEventListener('mouseleave', (e) => { if (isRecording && !isLockedMode) stopAndSend(); });
 }
 
-// === ЗАГРУЗКА ФОТО/ВИДЕО ===
+// ==========================================
+// === ОТПРАВКА ФОТО/ВИДЕО (CHUNKING) ===
+// ==========================================
 const CHUNK_SIZE = 500 * 1024; 
+
 async function uploadFileInChunks(file, parentDocId) {
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const batch = writeBatch(db);
@@ -568,6 +524,7 @@ async function uploadFileInChunks(file, parentDocId) {
     }
     await batch.commit();
 }
+
 async function loadVideoFromChunks(msgId, mimeType) {
     const q = query(collection(db, "chats", currentChatId, "messages", msgId, "chunks"), orderBy("index"));
     const snap = await getDocs(q);
@@ -577,15 +534,18 @@ async function loadVideoFromChunks(msgId, mimeType) {
     const blobs = await Promise.all(parts);
     return new Blob(blobs, { type: mimeType });
 }
+
 function compressChatImage(file) {
     return new Promise((resolve, reject) => {
-        const reader = new FileReader(); reader.readAsDataURL(file);
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
         reader.onload = (event) => {
             const img = new Image(); img.src = event.target.result;
             img.onload = () => {
                 const canvas = document.createElement('canvas'); const MAX_SIZE = 600; 
                 let w = img.width; let h = img.height;
-                if (w > h) { if (w > MAX_SIZE) { h *= MAX_SIZE / w; w = MAX_SIZE; } } else { if (h > MAX_SIZE) { w *= MAX_SIZE / h; h = MAX_SIZE; } }
+                if (w > h) { if (w > MAX_SIZE) { h *= MAX_SIZE / w; w = MAX_SIZE; } } 
+                else { if (h > MAX_SIZE) { w *= MAX_SIZE / h; h = MAX_SIZE; } }
                 canvas.width = w; canvas.height = h;
                 const ctx = canvas.getContext("2d"); ctx.drawImage(img, 0, 0, w, h);
                 resolve(canvas.toDataURL("image/jpeg", 0.6));
@@ -593,6 +553,7 @@ function compressChatImage(file) {
         };
     });
 }
+
 function compressImage(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader(); reader.readAsDataURL(file);
@@ -608,6 +569,7 @@ function compressImage(file) {
         };
     });
 }
+
 function generateVideoThumbnail(file) {
     return new Promise((resolve) => {
         const video = document.createElement('video');
@@ -627,6 +589,7 @@ function generateVideoThumbnail(file) {
 }
 
 btnAttachImg.addEventListener('click', () => { chatImgUpload.value=''; chatImgUpload.click(); });
+
 chatImgUpload.addEventListener('change', (e) => {
     const file = e.target.files[0]; if (!file) return; selectedFile = file;
     const reader = new FileReader();
@@ -641,84 +604,185 @@ chatImgUpload.addEventListener('change', (e) => {
     };
     reader.readAsDataURL(file);
 });
+
 btnCancelPhoto.addEventListener('click', () => { photoModal.classList.remove('active'); chatImgUpload.value=''; selectedFile = null; });
+
 btnConfirmPhoto.addEventListener('click', async () => {
     if (!selectedFile || !currentChatId) return;
     const isVideo = selectedFile.type.startsWith('video/');
     btnConfirmPhoto.innerText = isVideo ? "ЗАГРУЗКА..." : "СЖАТИЕ..."; btnConfirmPhoto.disabled = true;
+
     try {
         let contentBase64 = null; let isChunked = false; let videoThumb = null;
         const caption = photoCaptionInput.value.trim() || (isVideo ? "[ВИДЕО]" : "[ФОТО]");
+
         if (isVideo) {
             isChunked = true; videoThumb = await generateVideoThumbnail(selectedFile);
         } else {
             contentBase64 = await compressChatImage(selectedFile);
         }
+
         const msgData = {
             text: caption, senderId: auth.currentUser.uid, senderNick: currentUserData.nickname,
             senderAvatar: currentUserData.avatarBase64 || null, createdAt: serverTimestamp(), edited: false, read: false,
             type: isVideo ? 'video' : 'image', mimeType: selectedFile.type
         };
+
         if (isChunked) {
             msgData.isChunked = true; msgData.fileSize = selectedFile.size; msgData.videoThumbnail = videoThumb;
         } else {
             msgData.imageBase64 = contentBase64;
         }
+
         const msgRef = await addDoc(collection(db, "chats", currentChatId, "messages"), msgData);
         if (isChunked) await uploadFileInChunks(selectedFile, msgRef.id);
         await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp(), hiddenFor: [] });
+        
         photoModal.classList.remove('active'); chatImgUpload.value = ''; selectedFile = null;
     } catch (err) { console.error(err); alert("ОШИБКА"); } 
     finally { btnConfirmPhoto.innerText = "ОТПРАВИТЬ"; btnConfirmPhoto.disabled = false; }
 });
 
 // ==========================================
-// === 5. РЕНДЕР СООБЩЕНИЙ ===
+// === РЕНДЕР И ПРОСМОТР ===
+// ==========================================
+// ==========================================
+// === ПРОСМОТРЩИК (LIGHTBOX) ===
+// ==========================================
+
+// Функция принудительного закрытия
+function closeLightbox() {
+    imageViewerModal.classList.remove('active');
+    fullImageView.src = "";
+    try {
+        fullVideoView.pause();
+        fullVideoView.currentTime = 0;
+        fullVideoView.src = ""; 
+        fullVideoView.removeAttribute('src'); 
+    } catch (e) { console.log("Видео остановлено"); }
+}
+
+function viewMedia(type, src, caption) {
+    // Сбрасываем всё
+    fullImageView.style.display = 'none';
+    fullVideoView.style.display = 'none';
+    
+    if (type === 'video') {
+        fullVideoView.style.display = 'block';
+        fullVideoView.src = src;
+        // Пробуем автоплей
+        fullVideoView.play().catch(() => {}); 
+    } else {
+        // Останавливаем видео, если оно было
+        try { fullVideoView.pause(); } catch(e){}
+        
+        fullImageView.style.display = 'block';
+        fullImageView.src = src;
+    }
+    
+    const cleanCaption = (caption && caption !== "[ФОТО]" && caption !== "[ВИДЕО]") ? caption : "";
+    imageCaptionView.innerText = cleanCaption;
+    imageViewerModal.classList.add('active');
+}
+
+// ЛОГИКА КНОПКИ ПОЛНОГО ЭКРАНА (УНИВЕРСАЛЬНАЯ)
+if (fullscreenBtn) {
+    fullscreenBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // Чтобы не закрылось окно при клике
+        const v = fullVideoView;
+        
+        if (v.requestFullscreen) {
+            v.requestFullscreen(); // Стандарт (Android/PC)
+        } else if (v.webkitEnterFullscreen) {
+            v.webkitEnterFullscreen(); // iOS (iPhone)
+        } else if (v.webkitRequestFullscreen) {
+            v.webkitRequestFullscreen(); // Старые Android
+        } else if (v.mozRequestFullScreen) {
+            v.mozRequestFullScreen(); // Firefox
+        }
+    });
+}
+
+// Привязка событий закрытия
+if (closeImageViewer) closeImageViewer.onclick = closeLightbox;
+
+imageViewerModal.addEventListener('click', (e) => {
+    // Не закрываем, если нажали на кнопку полного экрана (на всякий случай)
+    if (e.target === imageViewerModal) closeLightbox();
+});
+// ==========================================
+// === РЕНДЕР СООБЩЕНИЙ (ИСПРАВЛЕНО) ===
 // ==========================================
 function renderMessage(docSnap) {
     const msg = docSnap.data();
     const isMine = msg.senderId === auth.currentUser.uid;
+    
+    // 1. Контейнер строки
     const row = document.createElement('div');
     row.className = `msg-row ${isMine ? 'my' : 'other'}`;
 
+    // 2. Аватар (только для чужих)
     if (!isMine) {
         const avatar = document.createElement('img');
         avatar.className = 'chat-avatar';
-        if (currentChatPartnerAvatar) avatar.src = currentChatPartnerAvatar;
-        else if (msg.senderAvatar) avatar.src = msg.senderAvatar;
-        else avatar.src = DEFAULT_AVATAR;
+        
+        if (currentChatPartnerAvatar) {
+            avatar.src = currentChatPartnerAvatar;
+        } else if (msg.senderAvatar) {
+            avatar.src = msg.senderAvatar;
+        } else {
+            avatar.src = DEFAULT_AVATAR;
+        }
+        
         avatar.onclick = () => openProfile(msg.senderId, false);
         row.appendChild(avatar);
     }
 
+    // 3. Пузырь сообщения
     const div = document.createElement('div');
     div.className = `msg ${isMine ? 'my' : 'other'}`;
     
+    // Имя над сообщением (для чужих)
     if (!isMine) {
         const nickSpan = document.createElement('div');
         nickSpan.innerText = msg.senderNick;
-        nickSpan.style.fontSize = '0.7rem'; nickSpan.style.marginBottom = '2px'; nickSpan.style.color = '#888'; nickSpan.style.cursor = 'pointer';
+        nickSpan.style.fontSize = '0.7rem'; 
+        nickSpan.style.marginBottom = '2px'; 
+        nickSpan.style.color = '#888'; 
+        nickSpan.style.cursor = 'pointer';
         nickSpan.onclick = () => openProfile(msg.senderId, false);
         div.appendChild(nickSpan);
     }
 
+    // 4. Контент (Видео / Аудио / Фото / Текст)
     const contentDiv = document.createElement('div');
+    
     if (msg.audioBase64) {
+        // --- АУДИО ---
         const audioWrapper = document.createElement('div');
         audioWrapper.className = 'audio-player-wrapper';
         const audio = document.createElement('audio');
-        audio.controls = true; audio.src = msg.audioBase64;
+        audio.controls = true; 
+        audio.src = msg.audioBase64;
         audioWrapper.appendChild(audio);
         contentDiv.appendChild(audioWrapper);
+
     } else if (msg.type === 'video' && msg.isChunked) {
+        // --- ВИДЕО ---
         const videoContainer = document.createElement('div');
         videoContainer.className = 'video-msg-container';
+        
         const thumbSrc = msg.videoThumbnail || DEFAULT_AVATAR; 
         videoContainer.innerHTML = `<img src="${thumbSrc}" class="msg-video-thumb"><div class="play-icon-overlay"></div>`;
+        
         videoContainer.onclick = async () => {
-            if (videoContainer.dataset.blobUrl) { viewMedia('video', videoContainer.dataset.blobUrl, msg.text); return; }
+            if (videoContainer.dataset.blobUrl) {
+                viewMedia('video', videoContainer.dataset.blobUrl, msg.text);
+                return;
+            }
             const playIcon = videoContainer.querySelector('.play-icon-overlay');
             playIcon.style.border = "2px dashed yellow";
+            
             try {
                 const videoBlob = await loadVideoFromChunks(docSnap.id, msg.mimeType);
                 if (videoBlob) {
@@ -726,80 +790,103 @@ function renderMessage(docSnap) {
                     videoContainer.dataset.blobUrl = vidUrl; 
                     viewMedia('video', vidUrl, msg.text);
                     playIcon.style.border = "2px solid #fff";
-                } else alert("ОШИБКА ВИДЕО");
-            } catch (e) { alert("СБОЙ СЕТИ"); }
+                } else {
+                    alert("ОШИБКА ВИДЕО");
+                }
+            } catch (e) {
+                alert("СБОЙ СЕТИ");
+            }
         };
         contentDiv.appendChild(videoContainer);
+        
         if(msg.text && msg.text !== "[ВИДЕО]") {
-            const caption = document.createElement('div'); caption.innerText = msg.text; caption.style.marginTop = "5px"; contentDiv.appendChild(caption);
+            const caption = document.createElement('div');
+            caption.innerText = msg.text; 
+            caption.style.marginTop = "5px";
+            contentDiv.appendChild(caption);
         }
+
     } else if (msg.imageBase64 || msg.type === 'image') {
+        // --- ФОТО ---
         const img = document.createElement('img');
-        img.src = msg.imageBase64; img.className = 'msg-image-content';
+        img.src = msg.imageBase64; 
+        img.className = 'msg-image-content';
         img.onclick = () => viewMedia('image', msg.imageBase64, msg.text);
         contentDiv.appendChild(img);
+        
         if(msg.text && msg.text !== "[ФОТО]") {
-            const caption = document.createElement('div'); caption.innerText = msg.text; caption.style.marginTop = "5px"; contentDiv.appendChild(caption);
+            const caption = document.createElement('div');
+            caption.innerText = msg.text; 
+            caption.style.marginTop = "5px";
+            contentDiv.appendChild(caption);
         }
     } else {
+        // --- ТЕКСТ ---
         contentDiv.innerHTML = `${msg.text} ${msg.edited ? '<small>(РЕД.)</small>' : ''}`;
     }
+    
     div.appendChild(contentDiv);
 
-    const metaDiv = document.createElement('div'); metaDiv.className = 'msg-meta';
+    // 5. Мета-данные (Время, Ред, Удалить, Статус)
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'msg-meta';
+    
     if (isMine && !msg.imageBase64 && !msg.audioBase64 && !msg.videoBase64 && msg.type !== 'video') {
-        const editBtn = document.createElement('span'); editBtn.innerText = '[E]'; editBtn.style.cursor = 'pointer'; editBtn.style.marginRight = '5px';
+        const editBtn = document.createElement('span');
+        editBtn.innerText = '[E]'; 
+        editBtn.style.cursor = 'pointer'; 
+        editBtn.style.marginRight = '5px';
         editBtn.onclick = () => editMsg(currentChatId, docSnap.id, msg.text);
         metaDiv.appendChild(editBtn);
     }
     if (isMine) {
-        const delBtn = document.createElement('span'); delBtn.innerText = '[X]'; delBtn.style.cursor = 'pointer'; delBtn.style.marginRight = '5px';
+        const delBtn = document.createElement('span');
+        delBtn.innerText = '[X]'; 
+        delBtn.style.cursor = 'pointer'; 
+        delBtn.style.marginRight = '5px';
         delBtn.onclick = () => deleteMsg(currentChatId, docSnap.id);
         metaDiv.appendChild(delBtn);
     }
+
     const timeSpan = document.createElement('span');
     const date = msg.createdAt ? msg.createdAt.toDate() : new Date();
     timeSpan.innerText = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
     metaDiv.appendChild(timeSpan);
+
     if (isMine) {
-        const statusSpan = document.createElement('span'); statusSpan.className = 'msg-status';
-        if (docSnap.metadata.hasPendingWrites) { statusSpan.innerHTML = '🕒'; statusSpan.className += ' status-wait'; }
-        else if (msg.read) { statusSpan.innerHTML = '✓✓'; statusSpan.className += ' status-read'; }
-        else { statusSpan.innerHTML = '✓'; statusSpan.className += ' status-sent'; }
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'msg-status';
+        if (docSnap.metadata.hasPendingWrites) {
+            statusSpan.innerHTML = '🕒'; 
+            statusSpan.className += ' status-wait';
+        } else if (msg.read) {
+            statusSpan.innerHTML = '✓✓'; 
+            statusSpan.className += ' status-read';
+        } else {
+            statusSpan.innerHTML = '✓'; 
+            statusSpan.className += ' status-sent';
+        }
         metaDiv.appendChild(statusSpan);
     }
+
     div.appendChild(metaDiv);
     row.appendChild(div);
+    
+    // 6. ВАЖНО: ДОБАВЛЕНИЕ В HTML
     const messagesArea = document.getElementById('messages-area');
-    if (messagesArea) messagesArea.appendChild(row);
+    if (messagesArea) {
+        messagesArea.appendChild(row);
+    }
 }
 
 // ==========================================
-// === 6. ПРОСМОТРЩИК И ПОИСК ===
+// === ПРОФИЛЬ, ПОИСК, УДАЛЕНИЕ ===
 // ==========================================
-function closeLightbox() {
-    imageViewerModal.classList.remove('active');
-    fullImageView.src = "";
-    try { fullVideoView.pause(); fullVideoView.currentTime = 0; fullVideoView.src = ""; fullVideoView.removeAttribute('src'); } catch (e) {}
-}
-function viewMedia(type, src, caption) {
-    fullImageView.style.display = 'none'; fullVideoView.style.display = 'none';
-    if (type === 'video') { fullVideoView.style.display = 'block'; fullVideoView.src = src; fullVideoView.play().catch(() => {}); }
-    else { try { fullVideoView.pause(); } catch(e){} fullImageView.style.display = 'block'; fullImageView.src = src; }
-    const cleanCaption = (caption && caption !== "[ФОТО]" && caption !== "[ВИДЕО]") ? caption : "";
-    imageCaptionView.innerText = cleanCaption;
-    imageViewerModal.classList.add('active');
-}
-if (fullscreenBtn) {
-    fullscreenBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); const v = fullVideoView;
-        if (v.requestFullscreen) v.requestFullscreen(); else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();
-    });
-}
-if (closeImageViewer) closeImageViewer.onclick = closeLightbox;
-imageViewerModal.addEventListener('click', (e) => { if (e.target === imageViewerModal) closeLightbox(); });
-
-// ПРОФИЛЬ И ПОИСК
+document.getElementById('my-profile-link').addEventListener('click', () => { if(currentUserData) openProfile(currentUserData.uid, true); });
+btnUploadAvatar.addEventListener('click', () => avatarUpload.click());
+avatarUpload.addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if(file) { try { const b = await compressImage(file); profileImgPreview.src=b; profileImgPreview.style.display='block'; avatarPlaceholder.style.display='none'; } catch(e){ alert("Err"); } }
+});
 async function openProfile(uid, isMy) {
     profileToEdit=uid; let d=null;
     if(isMy) d=currentUserData; else {const s=await getDoc(doc(db,"users",uid)); if(s.exists()) d=s.data();}
@@ -811,10 +898,6 @@ async function openProfile(uid, isMy) {
     else{profileNickInput.disabled=true; profileDescInput.disabled=true; btnUploadAvatar.style.display='none'; btnSaveProfile.style.display='none';}
     profileModal.classList.add('active');
 }
-btnUploadAvatar.addEventListener('click', () => avatarUpload.click());
-avatarUpload.addEventListener('change', async (e) => {
-    const file = e.target.files[0]; if(file) { try { const b = await compressImage(file); profileImgPreview.src=b; profileImgPreview.style.display='block'; avatarPlaceholder.style.display='none'; } catch(e){ alert("Err"); } }
-});
 btnSaveProfile.addEventListener('click', async()=>{
     const n=profileNickInput.value.trim(); const desc=profileDescInput.value.trim(); const av=profileImgPreview.src.startsWith('data:')?profileImgPreview.src:null;
     if(n.length<3) return alert("Короткий ник");
@@ -849,11 +932,13 @@ function renderSearchResults(s) {
     });
 }
 document.addEventListener('click',(e)=>{if(searchInput&&!searchInput.contains(e.target)&&!searchResultsArea.contains(e.target))searchResultsArea.style.display='none';});
+
 async function startChat(tUid, tNick){
     const cid=[auth.currentUser.uid,tUid].sort().join("_");
     await setDoc(doc(db,"chats",cid),{participants:[auth.currentUser.uid,tUid],participantNames:[currentUserData.nickname,tNick],lastUpdated:serverTimestamp()}, {merge:true});
     openChat(cid,tNick);
 }
+
 window.confirmDeleteChat=(cid)=>{chatToDeleteId=cid; deleteChatModal.classList.add('active');};
 document.getElementById('btn-del-cancel').addEventListener('click',()=>{deleteChatModal.classList.remove('active'); chatToDeleteId=null;});
 document.getElementById('btn-del-me').addEventListener('click',async()=>{
@@ -869,576 +954,642 @@ document.getElementById('btn-del-all').addEventListener('click',async()=>{
 });
 window.deleteMsg=async(c,m)=>{if(await showModal('УДАЛИТЬ?','confirm'))await deleteDoc(doc(db,"chats",c,"messages",m));};
 window.editMsg=async(c,m,o)=>{const v=await showModal('ИЗМЕНИТЬ:','prompt',o); if(v&&v!==o)await updateDoc(doc(db,"chats",c,"messages",m),{text:v,edited:true});};
+// ==========================================
+// === ПОИСК В ЧАТЕ (ВСТАВИТЬ В КОНЕЦ) ===
+// ==========================================
 
-// ==========================================
-// === 7. ПОИСК В ЧАТЕ ===
-// ==========================================
-let searchMatches = []; let currentMatchIndex = -1;
-if (btnToggleSearch) { btnToggleSearch.addEventListener('click', () => { searchBar.style.display = 'flex'; searchInputChat.focus(); }); }
-if (btnCloseSearch) { btnCloseSearch.addEventListener('click', closeSearch); }
+const btnToggleSearch = document.getElementById('btn-toggle-search');
+const searchBar = document.getElementById('chat-search-bar');
+const searchInputChat = document.getElementById('chat-search-input');
+const btnSearchUp = document.getElementById('btn-search-up');
+const btnSearchDown = document.getElementById('btn-search-down');
+const btnCloseSearch = document.getElementById('btn-close-search');
+const searchCountLabel = document.getElementById('search-count');
+
+let searchMatches = [];
+let currentMatchIndex = -1;
+
+// Показываем кнопку поиска только когда чат открыт (добавь вызов в openChat если хочешь, 
+// или используем Observer, но проще просто проверять стиль в логике интерфейса)
+// Для простоты: кнопка управляется CSS/JS при открытии чата. 
+// В функции openChat() найди строчку chatPanel.classList.add('open'); и добавь ниже:
+// if(btnToggleSearch) btnToggleSearch.style.display = 'block';
+
+// Логика переключения
+if (btnToggleSearch) {
+    btnToggleSearch.addEventListener('click', () => {
+        searchBar.style.display = 'flex';
+        searchInputChat.focus();
+    });
+}
+
+if (btnCloseSearch) {
+    btnCloseSearch.addEventListener('click', closeSearch);
+}
+
 function closeSearch() {
-    searchBar.style.display = 'none'; clearHighlights(); searchInputChat.value = ''; searchMatches = []; currentMatchIndex = -1; updateSearchCount();
-}
-if (searchInputChat) {
-    searchInputChat.addEventListener('input', (e) => {
-        const text = e.target.value.trim().toLowerCase(); clearHighlights();
-        if (text.length < 2) { searchMatches = []; currentMatchIndex = -1; updateSearchCount(); return; }
-        performChatSearch(text);
-    });
-    searchInputChat.addEventListener('keydown', (e) => { if (e.key === 'Enter') navigateSearch(1); });
-}
-function performChatSearch(text) {
-    const messages = document.querySelectorAll('#messages-area .msg'); searchMatches = [];
-    messages.forEach(msgDiv => {
-        const content = msgDiv.innerText; 
-        if (content.toLowerCase().includes(text)) highlightTextInNode(msgDiv, text);
-    });
-    searchMatches = Array.from(document.querySelectorAll('.highlight-match'));
-    if (searchMatches.length > 0) { currentMatchIndex = searchMatches.length - 1; focusMatch(currentMatchIndex); }
+    searchBar.style.display = 'none';
+    clearHighlights();
+    searchInputChat.value = '';
+    searchMatches = [];
+    currentMatchIndex = -1;
     updateSearchCount();
 }
+
+if (searchInputChat) {
+    searchInputChat.addEventListener('input', (e) => {
+        const text = e.target.value.trim().toLowerCase();
+        clearHighlights();
+        if (text.length < 2) {
+            searchMatches = [];
+            currentMatchIndex = -1;
+            updateSearchCount();
+            return;
+        }
+        performChatSearch(text);
+    });
+    
+    // Enter для перехода к следующему
+    searchInputChat.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') navigateSearch(1);
+    });
+}
+
+function performChatSearch(text) {
+    const messages = document.querySelectorAll('#messages-area .msg');
+    searchMatches = [];
+    
+    messages.forEach(msgDiv => {
+        // Ищем только в текстовых узлах, чтобы не сломать HTML структуру картинок/видео
+        // Простой вариант: ищем внутри div, если это текст
+        // Сложный вариант (здесь): рекурсивный поиск текста
+        
+        // Для твоего кода (msg.text или подпись)
+        // Сначала очищаем старые, потом ищем
+        const content = msgDiv.innerText; 
+        if (content.toLowerCase().includes(text)) {
+           highlightTextInNode(msgDiv, text);
+        }
+    });
+
+    // Собираем все созданные спаны .highlight-match
+    searchMatches = Array.from(document.querySelectorAll('.highlight-match'));
+    if (searchMatches.length > 0) {
+        // Начинаем с последнего сообщения (как в Telegram - снизу вверх)
+        currentMatchIndex = searchMatches.length - 1;
+        focusMatch(currentMatchIndex);
+    }
+    updateSearchCount();
+}
+
 function highlightTextInNode(element, text) {
+    // Осторожная замена, чтобы не сломать теги картинок
+    // Работаем только если внутри нет input/img/video, или ищем конкретно в текстовых нодах
+    // В твоем рендере текст лежит прямо в div или в div внутри div.
+    
+    // Простой безопасный метод для твоего рендера:
+    // Если это текстовое сообщение (нет картинок внутри)
     if (!element.querySelector('img') && !element.querySelector('video') && !element.querySelector('.audio-player-wrapper')) {
         const innerHTML = element.innerHTML;
         const regex = new RegExp(`(${escapeRegExp(text)})`, 'gi');
         element.innerHTML = innerHTML.replace(regex, '<span class="highlight-match">$1</span>');
-    } else {
+    } 
+    // Если есть подпись к фото/видео (обычно это последний div)
+    else {
         const children = element.childNodes;
         children.forEach(child => {
-            if (child.nodeType === 3 && child.textContent.toLowerCase().includes(text)) {
+            if (child.nodeType === 3 && child.textContent.toLowerCase().includes(text)) { // Text node
                 const span = document.createElement('span');
                 span.innerHTML = child.textContent.replace(new RegExp(`(${escapeRegExp(text)})`, 'gi'), '<span class="highlight-match">$1</span>');
                 element.replaceChild(span, child);
+            } else if (child.nodeType === 1 && !child.tagName.match(/IMG|VIDEO|AUDIO/)) {
+                // Рекурсия для вложенных дивов (подписи)
+                 if (child.innerText.toLowerCase().includes(text)) {
+                     const regex = new RegExp(`(${escapeRegExp(text)})`, 'gi');
+                     child.innerHTML = child.innerHTML.replace(regex, '<span class="highlight-match">$1</span>');
+                 }
             }
         });
     }
 }
-function escapeRegExp(string) { return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
+}
+
 function clearHighlights() {
     const highlights = document.querySelectorAll('.highlight-match, .highlight-current');
-    highlights.forEach(span => { const parent = span.parentNode; parent.replaceChild(document.createTextNode(span.textContent), span); parent.normalize(); });
+    highlights.forEach(span => {
+        const parent = span.parentNode;
+        parent.replaceChild(document.createTextNode(span.textContent), span);
+        parent.normalize(); // Объединяет текстовые узлы обратно
+    });
 }
+
 function focusMatch(index) {
+    // Снимаем активный класс со всех
     document.querySelectorAll('.highlight-current').forEach(el => el.classList.remove('highlight-current'));
+    
     const el = searchMatches[index];
-    if (el) { el.classList.add('highlight-current'); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    if (el) {
+        el.classList.add('highlight-current');
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
     updateSearchCount();
 }
+
 function navigateSearch(direction) {
     if (searchMatches.length === 0) return;
     currentMatchIndex += direction;
+    
     if (currentMatchIndex >= searchMatches.length) currentMatchIndex = 0;
     if (currentMatchIndex < 0) currentMatchIndex = searchMatches.length - 1;
+    
     focusMatch(currentMatchIndex);
 }
+
 function updateSearchCount() {
-    if (searchMatches.length === 0) searchCountLabel.innerText = "0/0";
-    else searchCountLabel.innerText = `${currentMatchIndex + 1}/${searchMatches.length}`;
-}
-if(btnSearchUp) btnSearchUp.addEventListener('click', () => navigateSearch(-1));
-if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1));
-
-// --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ (оставлены как есть, но добавлены комментарии) ---
-// let currentCall = null; // Текущий PeerJS вызов
-// let peer = null; // PeerJS объект
-// let activeCallDocId = null; // ID документа вызова в Firestore
-// let callUnsubscribe = null; // Отписка от прослушивания статуса вызова
-// let localStream = null; // Локальный медиапоток
-
-// --- СИСТЕМА ЗВОНКОВ (V3 STABLE - ИСПРАВЛЕНАЯ) ---
-
-let callStatus = 'idle'; // Добавим глобальное состояние вызова для лучшего контроля
-let isCallActive = false; // Флаг активности вызова
-
-function updateCallStatusUI(statusText, color = "#888") {
-    const statusElement = document.getElementById('call-status-text');
-    if (statusElement) {
-        statusElement.innerText = statusText;
-        statusElement.style.color = color;
+    if (searchMatches.length === 0) {
+        searchCountLabel.innerText = "0/0";
+    } else {
+        searchCountLabel.innerText = `${currentMatchIndex + 1}/${searchMatches.length}`;
     }
 }
 
-function resetCallState() {
-    callStatus = 'idle';
-    isCallActive = false;
-    currentCall = null;
-    // Не уничтожаем peer здесь, делаем это отдельно
-    localStream = null;
-    activeCallDocId = null;
-    if (callUnsubscribe) {
-        callUnsubscribe(); // Отписываемся, если был
-        callUnsubscribe = null;
-    }
-    stopCallTimer();
-    const audioEl = document.getElementById('remote-audio');
-    if (audioEl) {
-        audioEl.pause();
-        audioEl.srcObject = null;
-    }
-}
+if(btnSearchUp) btnSearchUp.addEventListener('click', () => navigateSearch(-1)); // Вверх (предыдущее в списке DOM, но раннее по времени)
+if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1)); // Вниз
 
-function cleanupPeer() {
-    if (peer) {
-        // Удаляем обработчики перед уничтожением, чтобы избежать лишних вызовов
-        peer.off('open');
-        peer.off('error');
-        peer.off('call'); // Убираем обработчик входящих вызовов
-        peer.destroy();
-        peer = null;
-        console.log("PeerJS destroyed.");
-    }
-}
+// ==========================================
+// === СИСТЕМА ЗВОНКОВ (WEBRTC + FIRESTORE) ===
+// ==========================================
 
-// Агрессивная разблокировка аудио (iOS Fix)
-function unlockAudioEngine() {
-    const audioEl = document.getElementById('remote-audio');
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (AudioContext) {
-        const ctx = new AudioContext();
-        if (ctx.state === 'suspended') ctx.resume();
-    }
-    if (audioEl) {
-        audioEl.srcObject = null;
-        audioEl.muted = true;
-        audioEl.play()
-            .then(() => {
-                audioEl.muted = false;
-                console.log("🔊 Audio Engine Unlocked");
-            })
-            .catch(e => console.warn("Audio unlock pending interaction", e));
-    }
-}
+// 1. Инициализация P2P
+function initPeer(uid) {
+    if (peer) return;
+    
+    console.log("🚀 Initializing PeerJS with ID:", uid);
 
-async function getMediaStream() {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-            video: false // Убедитесь, что видео отключено, если не используется
-        });
-        return stream;
-    } catch (err) {
-        alert("ОШИБКА МИКРОФОНА: " + err.message);
-        throw err; // Пробрасываем ошибку, чтобы вызывающий код мог обработать
-    }
-}
-
-// --- УЛУЧШЕННОЕ СОЗДАНИЕ PEER (с обработкой ошибок и переподключения) ---
-async function createPeer() {
-    // Очищаем старый peer перед созданием нового
-    cleanupPeer();
-
-    return new Promise((resolve, reject) => {
-        // Создаем Peer
-        peer = new Peer(peerConfig);
-
-        const timeout = setTimeout(() => {
-            if (peer && !peer.id) {
-                console.warn("⚠️ PeerJS timeout. Retrying...");
-                peer.destroy(); // Уничтожаем таймаутнувший экземпляр
-                // Повторный вызов createPeer не нужен, так как рекурсия была в старой версии
-                // Просто отклоняем текущий промис, вызывающий должен решить, пробовать ли снова
-                reject(new Error("PeerJS ID timeout"));
-            }
-        }, 8000); // Увеличил таймаут до 8 секунд
-
-        peer.on('open', (id) => {
-            clearTimeout(timeout);
-            console.log('✅ Fresh Peer ID:', id);
-            // СОЗДАЕМ ОБРАБОТЧИК ВХОДЯЩИХ ВЫЗОВОВ СНОВА ПОСЛЕ СОЗДАНИЯ PEER
-            peer.on('call', (call) => {
-                console.log("⚡ Incoming P2P Connection");
-                if (localStream && callStatus === 'idle') { // Убедимся, что мы не в активном вызове
-                    console.log("Answering incoming call...");
-                    call.answer(localStream);
-                    setupCallEvents(call);
-                } else {
-                    console.log("Rejecting incoming call - already in a call or no stream.");
-                    call.close(); // Отклоняем, если уже в вызове
-                }
-            });
-            resolve(id);
-        });
-
-        peer.on('error', (err) => {
-            clearTimeout(timeout);
-            console.error("Peer Error:", err.type, err.message);
-            // Устанавливаем статус ошибки
-            callStatus = 'error';
-            updateCallStatusUI("СБОЙ СЕТИ", "red");
-            // В зависимости от типа ошибки, можно попытаться пересоздать Peer
-            if (err.type === 'network' || err.type === 'disconnected' || err.type === 'peer-unavailable') {
-                 // Попробовать пересоздать Peer через задержку
-                 setTimeout(() => {
-                     if (callStatus !== 'active') { // Не пересоздаем, если вызов уже активен
-                         createPeer().catch(e => console.error("Failed to recreate Peer:", e));
-                     }
-                 }, 2000);
-            }
-            // Не отклоняем промис сразу, Peer может восстановиться сам
-            // reject(err); // Закомментировано, чтобы не прерывать процесс
-        });
-    });
-}
-
-function setupCallEvents(call) {
-    if (currentCall) {
-        console.warn("setupCallEvents called, but currentCall already exists. Closing old call.");
-        currentCall.close();
-    }
-    currentCall = call;
-
-    // ВАЖНО: Обработка уже открытого соединения и ошибок
-    if (call.open) {
-        console.log("✅ Call Connection Open (previously open)");
-        // Даже если уже open, проверяем stream
-        // PeerJS обычно вызывает 'stream' позже, но на всякий случай:
-        // Не вызываем startCallTimer здесь, так как 'stream' обработчик это делает
-    }
-
-    call.on('stream', (remoteStream) => {
-        console.log("🎧 Stream Received");
-        const audioEl = document.getElementById('remote-audio');
-        if (audioEl) {
-            audioEl.srcObject = remoteStream;
-            const playPromise = audioEl.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(e => {
-                    console.warn("Autoplay prevented. Waiting for interaction.", e);
-                    updateCallStatusUI("НАЖМИТЕ ЭКРАН!", "yellow");
-                });
-            }
+    peer = new Peer(uid, {
+        debug: 1,
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
         }
-        // Устанавливаем статус активного вызова ТОЛЬКО ПОСЛЕ получения потока
-        callStatus = 'active';
-        isCallActive = true;
-        updateCallStatusUI("В ЭФИРЕ", "#33ff33");
-        startCallTimer(); // Запускаем таймер только при получении потока
+    }); 
+    
+    peer.on('open', (id) => {
+        console.log('✅ My Peer ID is active:', id);
     });
 
-    call.on('close', () => {
-        console.log("📞 Call closed by remote or local.");
-        // endCallLocal(); // Вызовем endCallLocal, чтобы очистить все
-        if (isCallActive) {
-             endCallLocal();
+    // Обработка входящего (Receiver)
+    peer.on('call', (call) => {
+        console.log("📞 Incoming P2P call!");
+        
+        const answerLogic = (stream) => {
+            call.answer(stream);
+            call.on('stream', (remoteStream) => {
+                setupRemoteAudio(remoteStream);
+                startCallTimer();
+            });
+            call.on('close', () => endCallLocal());
+            currentCall = call;
+        };
+
+        if (localStream) {
+            answerLogic(localStream);
         } else {
-             // Вызов закрылся до активации (например, при отклонении)
-             resetCallState();
-             document.getElementById('active-call-screen').classList.remove('active');
-             document.getElementById('incoming-call-modal').classList.remove('active');
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then((s) => {
+                    localStream = s;
+                    answerLogic(s);
+                })
+                .catch(e => console.error("Mic error:", e));
+        }
+        setInterval(() => {
+            if (peer && peer.disconnected) {
+                console.log("🔄 PeerJS отключился (сон мобильного). Переподключаюсь...");
+                peer.reconnect();
+            }
+        }, 5000);
+    });
+    
+    // Глобальная обработка ошибок PeerJS
+    peer.on('error', (err) => {
+        console.error("🚨 PeerJS Error:", err.type, err);
+        
+        // Если ID занят (при перезагрузке), пробуем через 1 сек
+        if (err.type === 'unavailable-id') {
+            console.log("♻️ ID занят, пробую переподключиться...");
+            setTimeout(() => {
+                peer.destroy();
+                peer = null;
+                initPeer(uid);
+            }, 2000);
         }
     });
 
-    call.on('error', (err) => {
-        console.error("Call Stream Error:", err);
-        // Не вызываем endCallLocal сразу, PeerJS может восстановить соединение
-        // или вызвать close. Проверим статус позже.
-        if (callStatus === 'active') {
-             // Если ошибка произошла во время активного вызова
-             updateCallStatusUI("СБОЙ СОЕДИНЕНИЯ", "orange");
-             // endCallLocal(); // Или дать шанс на восстановление, например, по таймауту
-             // Пока что оставим как есть, но добавим логику восстановления при необходимости
-             // Лучше всего довериться PeerJS и обработать 'close' если соединение действительно потеряно
-        }
+    // ВАЖНО: Очистка при закрытии/перезагрузке
+    window.addEventListener('beforeunload', () => {
+        if (peer) peer.destroy();
     });
 }
-
-// --- КНОПКА ПОЗВОНИТЬ ---
-if (btnCall) {
-    btnCall.addEventListener('click', async () => {
-        if (!currentChatId || isCallActive) return; // Не начинать вызов, если уже в вызове
-
-        console.log("Attempting to initiate call...");
-        unlockAudioEngine();
-
-        const chatDoc = await getDoc(doc(db, "chats", currentChatId));
-        if (!chatDoc.exists()) {
-            console.error("Chat document not found.");
-            return;
-        }
-        const chatData = chatDoc.data();
-        const receiverId = chatData.participants.find(id => id !== auth.currentUser.uid);
-        if (!receiverId) {
-            console.error("Receiver ID not found.");
-            return;
-        }
-
-        try {
-            localStream = await getMediaStream();
-        } catch(e) {
-            console.error("Failed to get local stream:", e);
-            return; // Выход без запуска вызова
-        }
-
-        showActiveCallScreen(currentUserData.nickname, "ИНИЦИАЛИЗАЦИЯ...");
-        callStatus = 'initiating'; // Устанавливаем статус
-
-        try {
-            // 1. Создаем свой Peer
-            await createPeer(); // Убедимся, что peer готов и имеет ID
-
-            if (!peer || !peer.id) {
-                throw new Error("Failed to initialize PeerJS connection.");
-            }
-
-            // 2. Создаем документ вызова
-            const callDocRef = await addDoc(collection(db, "calls"), {
-                callerId: auth.currentUser.uid,
-                callerName: currentUserData.nickname,
-                callerAvatar: currentUserData.avatarBase64 || null,
-                receiverId: receiverId,
-                status: "offering",
-                pickupId: null, // Пока неизвестен ID получателя
-                timestamp: serverTimestamp()
-            });
-            activeCallDocId = callDocRef.id;
-            updateCallStatusUI("ОЖИДАНИЕ ОТВЕТА...");
-
-            // 3. Ждем, пока собеседник ответит и пришлет СВОЙ ID
-            callUnsubscribe = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
-                if (!snap.exists()) {
-                    console.log("Call document removed by receiver.");
-                    endCallLocal();
-                    return;
-                }
-                const data = snap.data();
-                if (data.status === "answered" && data.pickupId && !currentCall && callStatus === 'initiating') { // Проверяем статус
-                    updateCallStatusUI("СОЕДИНЕНИЕ...");
-                    console.log(`📞 Calling remote peer: ${data.pickupId}`);
-                    // Небольшая задержка перед вызовом, чтобы PeerJS успел стабилизироваться
-                    setTimeout(() => {
-                        if (peer && localStream) { // Проверяем, что Peer и поток все еще живы
-                            const call = peer.call(data.pickupId, localStream);
-                            setupCallEvents(call);
-                        } else {
-                            console.warn("Peer or localStream lost before calling.");
-                            endCallLocal();
-                        }
-                    }, 1000);
-                } else if (data.status === "rejected" || data.status === "ended") {
-                    console.log(`Call ${data.status}.`);
-                    endCallLocal();
-                } else if (data.status === "offering" && callStatus === 'initiating' && Date.now() - data.timestamp.toMillis() > 45000) {
-                     // Таймаут звонящего
-                     console.log("Call timeout from caller side.");
-                     endCallLocal();
-                }
-            });
-        } catch (e) {
-            console.error("Error during call initiation:", e);
-            updateCallStatusUI("СБОЙ ИНИЦИАЦИИ", "red");
-            resetCallState(); // Сброс состояния при ошибке
-            document.getElementById('active-call-screen').classList.remove('active');
-            if (localStream) {
-                localStream.getTracks().forEach(t => t.stop());
-                localStream = null;
-            }
-            if (peer) cleanupPeer(); // Уничтожаем Peer при ошибке
-        }
-    });
-}
-
-// --- СЛУШАТЕЛЬ ВХОДЯЩИХ (ИСПРАВЛЕН) ---
-function initIncomingCallListener(myUid) {
-    // Уничтожаем старый peer, если он был (например, при переподключении)
-    // cleanupPeer(); // Это может быть не нужно здесь, если Peer создается только при вызове
-    const q = query(collection(db, "calls"), where("receiverId", "==", myUid), where("status", "==", "offering"));
+// 2. Слушаем Firestore на предмет входящих вызовов
+function listenForIncomingCalls(myUid) {
+    const q = query(
+        collection(db, "calls"), 
+        where("receiverId", "==", myUid), 
+        where("status", "==", "offering")
+    );
+    
     onSnapshot(q, (snap) => {
         snap.docChanges().forEach((change) => {
             if (change.type === "added") {
                 const data = change.doc.data();
-                // Проверяем, не в активном ли мы уже вызове
-                if (isCallActive) {
-                    console.log("Already in a call, ignoring incoming call.");
-                    // Опционально: автоматически отклонить в Firestore
-                    // updateDoc(change.doc.ref, { status: "rejected" });
-                    return;
-                }
-                if (data.timestamp && (Date.now() - data.timestamp.toMillis() > 45000)) {
-                    console.log("Ignoring old incoming call.");
-                    return; // Игнор старых
-                }
-                console.log("Incoming call detected.");
+                // Проверяем, не старый ли это звонок (больше 30 сек)
+                const now = Date.now();
+                if (data.timestamp && (now - data.timestamp.toMillis()) > 45000) return;
+                
                 showIncomingCallModal(change.doc.id, data);
             }
         });
     });
 }
 
-// --- КНОПКА ОТВЕТИТЬ ---
-document.getElementById('btn-answer-call').addEventListener('click', async () => {
-    if (!incomingCallData || !activeCallDocId) {
-         console.error("No incoming call data to answer.");
-         document.getElementById('incoming-call-modal').classList.remove('active');
-         return;
+// 3. UI: Показать входящий
+function showIncomingCallModal(docId, data) {
+    if (currentCall || activeCallDocId) return; // Уже занят
+    
+    incomingCallData = { id: docId, ...data };
+    activeCallDocId = docId;
+    
+    document.getElementById('incoming-call-modal').classList.add('active');
+    document.getElementById('incoming-caller-name').innerText = data.callerName;
+    document.getElementById('incoming-call-avatar').src = data.callerAvatar || DEFAULT_AVATAR;
+    
+    // Играть звук рингтона (опционально, если есть файл)
+}
+
+// 4. Начало звонка (исходящий)
+
+// В openChat добавьте: if(btnCall) btnCall.style.display = 'flex';
+// В back-btn listener добавьте: if(btnCall) btnCall.style.display = 'none';
+
+if (btnCall) {
+    btnCall.addEventListener('click', async () => {
+        if (!currentChatId || !auth.currentUser) return;
+        
+        // Получаем ID собеседника
+        const chatDoc = await getDoc(doc(db, "chats", currentChatId));
+        if (!chatDoc.exists()) return;
+        
+        const participants = chatDoc.data().participants;
+        const receiverId = participants.find(id => id !== auth.currentUser.uid);
+        if (!receiverId) return;
+
+        startVoiceCall(receiverId);
+    });
+}
+
+async function startVoiceCall(receiverId) {
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch(e) {
+        alert("ОШИБКА МИКРОФОНА: " + e.message);
+        return;
     }
+
+    // Показываем интерфейс
+    showActiveCallScreen(currentUserData.nickname, "СОЕДИНЕНИЕ..."); 
+    
+    // Пытаемся подгрузить имя партнера (косметика)
+    getDoc(doc(db, "users", receiverId)).then(s => {
+        if(s.exists()) document.getElementById('call-partner-name').innerText = s.data().nickname;
+    });
+
+    // Создаем запись в Firestore
+    const callDocRef = await addDoc(collection(db, "calls"), {
+        callerId: auth.currentUser.uid,
+        callerName: currentUserData.nickname,
+        callerAvatar: currentUserData.avatarBase64,
+        receiverId: receiverId,
+        chatId: currentChatId,
+        status: "offering",
+        timestamp: serverTimestamp()
+    });
+    
+    activeCallDocId = callDocRef.id;
+
+    // --- СЛУШАЕМ ИЗМЕНЕНИЯ СТАТУСА (ГЛАВНАЯ ЛОГИКА) ---
+    onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        
+        // 1. СОБЕСЕДНИК ОТВЕТИЛ
+        if (data.status === "answered") {
+            // ВАЖНО: Если мы уже в звонке, игнорируем повторные обновления
+            if (currentCall) return;
+
+            document.getElementById('call-status-text').innerText = "УСТАНОВКА СВЯЗИ...";
+            console.log("⚡ Собеседник ответил. Начинаем P2P соединение...");
+
+            // Функция агрессивного дозвона
+            let connectAttempts = 0;
+            const maxAttempts = 5; 
+            
+            const attemptConnection = () => {
+                connectAttempts++;
+                console.log(`📡 Попытка соединения #${connectAttempts} с ID: ${receiverId}`);
+                document.getElementById('call-status-text').innerText = `ПОДКЛЮЧЕНИЕ (${connectAttempts})...`;
+
+                const call = peer.call(receiverId, localStream);
+
+                if (!call) {
+                    console.warn("⚠️ PeerJS ошибка вызова. Ретрай...");
+                    if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 2000);
+                    return;
+                }
+
+                // Таймер-страховка (если зависло на "Подключение...")
+                const connectionTimeout = setTimeout(() => {
+                    console.warn("⏰ Тайм-аут. Пробую перезвонить...");
+                    if (currentCall) currentCall.close();
+                    if (connectAttempts < maxAttempts) attemptConnection();
+                }, 5000);
+
+                call.on('stream', (remoteStream) => {
+                    clearTimeout(connectionTimeout); 
+                    console.log("✅ УРА! Поток получен!");
+                    setupRemoteAudio(remoteStream);
+                    startCallTimer();
+                });
+
+                call.on('close', () => endCallLocal());
+                
+                call.on('error', (err) => {
+                    console.error("Call Error:", err);
+                    clearTimeout(connectionTimeout);
+                    if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 1500);
+                });
+
+                currentCall = call;
+            };
+
+            // Запускаем дозвон через 1 секунду (даем телефону время проснуться)
+            setTimeout(attemptConnection, 1000);
+        } 
+        // 2. ЗВОНОК ОТКЛОНЕН
+        else if (data.status === "rejected") {
+            document.getElementById('call-status-text').innerText = "ОТКЛОНЕНО";
+            logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
+            setTimeout(endCallLocal, 1500);
+        }
+        // 3. ЗВОНОК ЗАВЕРШЕН
+        else if (data.status === "ended") {
+             document.getElementById('call-status-text').innerText = "ЗАВЕРШЕН";
+             setTimeout(endCallLocal, 1000);
+        }
+    });
+}
+            
+            // Добавляем слушатель ошибок специально для этого звонка
+            // Если вылетит peer-unavailable, пробуем снова
+            const retryHandler = (err) => {
+                if (err.type === 'peer-unavailable' && attempts < 4) {
+                    console.log(`♻️ Собеседник не найден (попытка ${attempts}/4). Жду 1.5 сек...`);
+                    setTimeout(tryConnect, 1500);
+                }
+            };
+            peer.on('error', retryHandler);
+            
+            // Удаляем слушатель при завершении звонка, чтобы не плодить их
+            const originalEnd = window.endCallLocal;
+            window.endCallLocal = () => {
+                peer.off('error', retryHandler);
+                // Тут вызываем старую функцию очистки, если она была (или просто копируем логику очистки)
+                document.getElementById('active-call-screen').classList.remove('active');
+                document.getElementById('incoming-call-modal').classList.remove('active');
+                if (currentCall) { currentCall.close(); currentCall = null; }
+                if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+                stopCallTimer();
+                activeCallDocId = null;
+                incomingCallData = null;
+            };
+        }
+        else if (data.status === "rejected") {
+            document.getElementById('call-status-text').innerText = "ОТКЛОНЕНО";
+            logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
+            setTimeout(endCallLocal, 1500);
+        }
+        else if (data.status === "ended") {
+             document.getElementById('call-status-text').innerText = "ЗАВЕРШЕН";
+             setTimeout(endCallLocal, 1000);
+        }
+    });
+}
+
+// 5. Ответ на звонок (МОБИЛЬНАЯ ВЕРСИЯ)
+document.getElementById('btn-answer-call').addEventListener('click', async () => {
     document.getElementById('incoming-call-modal').classList.remove('active');
-    console.log("Answering incoming call...");
-    unlockAudioEngine();
+    
+    // --- ВАЖНО: Разблокировка аудио для iPhone/Android ---
+    // Создаем пустой аудио-контекст, чтобы "пробить" автоплей
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+    }
+    // -----------------------------------------------------
 
     try {
-        showActiveCallScreen(incomingCallData.callerName, "ПОДКЛЮЧЕНИЕ...");
-        callStatus = 'answering'; // Устанавливаем статус
+        // Сразу показываем экран, чтобы пользователь видел реакцию
+        showActiveCallScreen(incomingCallData.callerName, "ЗАПУСК МИКРОФОНА...");
+        
+        // Запрашиваем микрофон
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Обновляем статус для визуализации
+        document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ P2P...";
 
-        localStream = await getMediaStream();
-        // 1. Создаем СВЕЖИЙ Peer
-        const myPickupId = await createPeer(); // Убедимся, что peer готов
+        // --- ВАЖНО: Сначала готовим PeerJS, потом говорим базе, что ответили ---
+        // Если мы сначала обновим базу, компьютер позвонит нам раньше, чем мы готовы.
+        
+        // Ставим небольшую задержку, чтобы PeerJS "проснулся" на телефоне
+        setTimeout(async () => {
+            // Только теперь обновляем статус в Firestore
+            await updateDoc(doc(db, "calls", activeCallDocId), { status: "answered" });
+            
+            // Слушаем завершение
+            const unsub = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
+                if (snap.exists() && snap.data().status === "ended") {
+                    unsub(); // Отписываемся
+                    endCallLocal();
+                }
+            });
+        }, 500);
 
-        if (!peer || !myPickupId) {
-            throw new Error("Failed to initialize PeerJS for answering.");
-        }
-
-        // 2. Передаем свой ID звонящему через базу
-        await updateDoc(doc(db, "calls", activeCallDocId), { status: "answered", pickupId: myPickupId });
-        updateCallStatusUI("ОТПРАВКА ID...");
-
-        // 3. Подписываемся на обновления статуса вызова
-        callUnsubscribe = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
-            if (!snap.exists()) {
-                console.log("Call document removed.");
-                endCallLocal();
-                return;
-            }
-            const data = snap.data();
-            if (data.status === "ended") {
-                console.log("Call ended by caller.");
-                endCallLocal();
-            } else if (data.status === "rejected") {
-                 console.log("Call rejected by caller (unexpected here).");
-                 endCallLocal();
-            }
-            // Статус "answered" уже обработан, и ожидается соединение от звонящего
-        });
-    } catch (e) {
-        console.error("Error during call answering:", e);
-        updateCallStatusUI("СБОЙ ОТВЕТА", "red");
-        resetCallState(); // Сброс состояния при ошибке
-        document.getElementById('active-call-screen').classList.remove('active');
-        if (localStream) {
-            localStream.getTracks().forEach(t => t.stop());
-            localStream = null;
-        }
-        if (peer) cleanupPeer(); // Уничтожаем Peer при ошибке
-        rejectCall(); // Отправляем отклонение в Firestore
+    } catch(e) {
+        console.error(e);
+        alert("Ошибка доступа к микрофону: " + e.message);
+        rejectCall();
     }
 });
 
-// UI Звонков (обновлены для лучшего отражения состояния)
-function showActiveCallScreen(name, status) {
-    document.getElementById('active-call-screen').classList.add('active');
-    document.getElementById('call-partner-name').innerText = name;
-    updateCallStatusUI(status);
-}
-
-// --- КНОПКА ОТКЛОНИТЬ ---
+// 6. Отклонение
 document.getElementById('btn-decline-call').addEventListener('click', rejectCall);
 
 async function rejectCall() {
-    console.log("Declining call.");
     document.getElementById('incoming-call-modal').classList.remove('active');
     if (activeCallDocId) {
-        try {
-            await updateDoc(doc(db, "calls", activeCallDocId), { status: "rejected" });
-        } catch(e){
-            console.error("Failed to update call status to rejected:", e);
-        }
+        await updateDoc(doc(db, "calls", activeCallDocId), { status: "rejected" });
+        activeCallDocId = null;
+        incomingCallData = null;
     }
-    resetCallState(); // Сбрасываем состояние при отклонении
 }
 
-// --- КНОПКА ЗАВЕРШИТЬ ВЫЗОВ ---
+// 7. Сброс / Завершение (Красная кнопка)
 document.getElementById('btn-hangup').addEventListener('click', async () => {
-    console.log("Hanging up call.");
     if (activeCallDocId) {
-        try {
-            await updateDoc(doc(db, "calls", activeCallDocId), { status: "ended" });
-        } catch(e){
-            console.error("Failed to update call status to ended:", e);
+        // Логируем в чат перед выходом, если мы были в разговоре
+        if (callSeconds > 0) {
+            logCallToChat(`📞 ЗВОНОК ЗАВЕРШЕН (${formatTime(callSeconds)})`);
+        } else if (document.getElementById('call-status-text').innerText === "СОЕДИНЕНИЕ...") {
+            logCallToChat("↩ ЗВОНОК ОТМЕНЕН");
         }
+
+        // Ставим статус ended, чтобы собеседник отключился
+        await updateDoc(doc(db, "calls", activeCallDocId), { status: "ended" });
     }
     endCallLocal();
 });
 
-// --- ОКОНЧАНИЕ ВЫЗОВА (ИСПРАВЛЕНО) ---
+// Общая функция очистки
 function endCallLocal() {
-    console.log("Ending call locally.");
-    if (!isCallActive && callStatus !== 'initiating' && callStatus !== 'answering') {
-        console.log("Call is not active, skipping endCallLocal.");
-        return; // Не завершаем, если вызов не был активен
-    }
-
-    // Сбрасываем флаги и состояние ДО закрытия соединений
-    isCallActive = false;
-    callStatus = 'ending';
-
     document.getElementById('active-call-screen').classList.remove('active');
     document.getElementById('incoming-call-modal').classList.remove('active');
-
-    // Закрываем PeerJS вызов
+    
     if (currentCall) {
         currentCall.close();
         currentCall = null;
     }
-
-    // Останавливаем локальный поток
     if (localStream) {
-        localStream.getTracks().forEach(t => t.stop());
+        localStream.getTracks().forEach(track => track.stop());
         localStream = null;
     }
-
-    // Отписываемся от Firestore
-    if (callUnsubscribe) {
-        callUnsubscribe();
-        callUnsubscribe = null;
-    }
-
-    // Уничтожаем Peer (это освободит ресурсы)
-    cleanupPeer(); // Вызов нашей новой функции очистки
-
-    // Останавливаем таймер
+    
+    const remoteAudio = document.getElementById('remote-audio');
+    if (remoteAudio) remoteAudio.srcObject = null;
+    
     stopCallTimer();
-
-    // Сбрасываем переменные
     activeCallDocId = null;
     incomingCallData = null;
-
-    // Сбрасываем UI статуса
-    updateCallStatusUI("ЗАВЕРШЕНО");
-    console.log("Local call ended and resources cleaned up.");
+    isMicMuted = false;
+    updateMicIcon();
 }
 
-// --- ТАЙМЕР ВЫЗОВА (остался без изменений) ---
+// 8. Управление аудио и таймер
+function setupRemoteAudio(stream) {
+    console.log("🎧 Настройка аудио потока...");
+    const audioEl = document.getElementById('remote-audio');
+    
+    // Сброс srcObject для надежности
+    audioEl.srcObject = null;
+    audioEl.srcObject = stream;
+    
+    // Явно задаем громкость
+    audioEl.volume = 1.0;
+
+    // Пытаемся воспроизвести
+    const playPromise = audioEl.play();
+
+    if (playPromise !== undefined) {
+        playPromise.then(() => {
+            console.log("🔊 Аудио воспроизводится!");
+            document.getElementById('call-status-text').innerText = "ЗВУК ЕСТЬ";
+            document.getElementById('call-status-text').style.color = "#33ff33";
+        }).catch(error => {
+            console.warn("🔇 Автоплей заблокирован браузером. Ждем клика.", error);
+            document.getElementById('call-status-text').innerText = "НАЖМИТЕ НА ЭКРАН";
+            document.getElementById('call-status-text').style.color = "yellow";
+            
+            // Хак: Включаем звук при любом клике по экрану
+            const enableAudio = () => {
+                audioEl.play();
+                document.getElementById('call-status-text').innerText = "В ЭФИРЕ";
+                document.getElementById('call-status-text').style.color = "#33ff33";
+                document.removeEventListener('click', enableAudio);
+                document.removeEventListener('touchstart', enableAudio);
+            };
+            
+            document.addEventListener('click', enableAudio);
+            document.addEventListener('touchstart', enableAudio);
+        });
+    }
+}
+
+document.getElementById('btn-mic-toggle').addEventListener('click', () => {
+    if (!localStream) return;
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack) {
+        isMicMuted = !isMicMuted;
+        audioTrack.enabled = !isMicMuted;
+        updateMicIcon();
+    }
+});
+
+function updateMicIcon() {
+    const btn = document.getElementById('btn-mic-toggle');
+    if (isMicMuted) {
+        btn.classList.add('muted');
+        btn.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+    } else {
+        btn.classList.remove('muted');
+        btn.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+    }
+}
+
+function showActiveCallScreen(name, status) {
+    document.getElementById('active-call-screen').classList.add('active');
+    document.getElementById('call-partner-name').innerText = name;
+    document.getElementById('call-status-text').innerText = status;
+    document.getElementById('call-status-text').style.color = "#888";
+    callSeconds = 0;
+    document.getElementById('call-timer').innerText = "00:00";
+}
+
 function startCallTimer() {
-    stopCallTimer(); // Останавливаем, если уже запущен
+    stopCallTimer();
     callTimerInterval = setInterval(() => {
         callSeconds++;
-        const m = Math.floor(callSeconds / 60).toString().padStart(2, '0');
-        const s = (callSeconds % 60).toString().padStart(2, '0');
-        document.getElementById('call-timer').innerText = `${m}:${s}`;
+        document.getElementById('call-timer').innerText = formatTime(callSeconds);
     }, 1000);
 }
 
 function stopCallTimer() {
-    if (callTimerInterval) {
-        clearInterval(callTimerInterval);
-        callTimerInterval = null;
-    }
+    if (callTimerInterval) clearInterval(callTimerInterval);
+    callTimerInterval = null;
 }
 
-// --- КНОПКА ВКЛ/ВЫКЛ МИКРОФОНА (осталась без изменений) ---
-document.getElementById('btn-mic-toggle').addEventListener('click', () => {
-    if (!localStream) return;
-    const track = localStream.getAudioTracks()[0];
-    if (track) {
-        track.enabled = !track.enabled;
-        const btn = document.getElementById('btn-mic-toggle');
-        if (!track.enabled) {
-            btn.classList.add('muted');
-            btn.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path></svg>`;
-        } else {
-            btn.classList.remove('muted');
-            btn.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
-        }
-    }
-});
+function formatTime(secs) {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+}
 
-
+// 9. Логирование в чат
+async function logCallToChat(text) {
+    if (!currentChatId || !auth.currentUser) return;
+    try {
+        await addDoc(collection(db, "chats", currentChatId, "messages"), {
+            text: text, 
+            senderId: auth.currentUser.uid, 
+            senderNick: currentUserData.nickname,
+            senderAvatar: currentUserData.avatarBase64 || null, 
+            createdAt: serverTimestamp(), 
+            edited: false,
+            read: false,
+            type: 'system' // Специальный тип, можно стилизовать отдельно
+        });
+        await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
+    } catch(e) { console.error("Log error", e); }
+}
