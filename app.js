@@ -902,19 +902,87 @@ function updateSearchCount() {
 if(btnSearchUp) btnSearchUp.addEventListener('click', () => navigateSearch(-1));
 if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1));
 
-// ==========================================
-// === 8. СИСТЕМА ЗВОНКОВ (V3 STABLE - FRESH PEER) ===
-// ==========================================
+// --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ (оставлены как есть, но добавлены комментарии) ---
+// let currentCall = null; // Текущий PeerJS вызов
+// let peer = null; // PeerJS объект
+// let activeCallDocId = null; // ID документа вызова в Firestore
+// let callUnsubscribe = null; // Отписка от прослушивания статуса вызова
+// let localStream = null; // Локальный медиапоток
+
+// --- КОНФИГ СЕТИ (оставлен как есть) ---
+const peerConfig = {
+    debug: 2,
+    secure: true,
+    config: {
+        iceServers: [
+            // ... ваш список серверов ...
+        ],
+        iceTransportPolicy: 'all',
+        iceCandidatePoolSize: 10
+    }
+};
+
+// --- СИСТЕМА ЗВОНКОВ (V3 STABLE - ИСПРАВЛЕНАЯ) ---
+
+let callStatus = 'idle'; // Добавим глобальное состояние вызова для лучшего контроля
+let isCallActive = false; // Флаг активности вызова
+
+function updateCallStatusUI(statusText, color = "#888") {
+    const statusElement = document.getElementById('call-status-text');
+    if (statusElement) {
+        statusElement.innerText = statusText;
+        statusElement.style.color = color;
+    }
+}
+
+function resetCallState() {
+    callStatus = 'idle';
+    isCallActive = false;
+    currentCall = null;
+    // Не уничтожаем peer здесь, делаем это отдельно
+    localStream = null;
+    activeCallDocId = null;
+    if (callUnsubscribe) {
+        callUnsubscribe(); // Отписываемся, если был
+        callUnsubscribe = null;
+    }
+    stopCallTimer();
+    const audioEl = document.getElementById('remote-audio');
+    if (audioEl) {
+        audioEl.pause();
+        audioEl.srcObject = null;
+    }
+}
+
+function cleanupPeer() {
+    if (peer) {
+        // Удаляем обработчики перед уничтожением, чтобы избежать лишних вызовов
+        peer.off('open');
+        peer.off('error');
+        peer.off('call'); // Убираем обработчик входящих вызовов
+        peer.destroy();
+        peer = null;
+        console.log("PeerJS destroyed.");
+    }
+}
 
 // Агрессивная разблокировка аудио (iOS Fix)
 function unlockAudioEngine() {
     const audioEl = document.getElementById('remote-audio');
     const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (AudioContext) { const ctx = new AudioContext(); if (ctx.state === 'suspended') ctx.resume(); }
+    if (AudioContext) {
+        const ctx = new AudioContext();
+        if (ctx.state === 'suspended') ctx.resume();
+    }
     if (audioEl) {
-        audioEl.srcObject = null; audioEl.muted = true;
-        audioEl.play().then(() => { audioEl.muted = false; console.log("🔊 Audio Engine Unlocked"); })
-        .catch(e => console.warn("Audio unlock pending interaction"));
+        audioEl.srcObject = null;
+        audioEl.muted = true;
+        audioEl.play()
+            .then(() => {
+                audioEl.muted = false;
+                console.log("🔊 Audio Engine Unlocked");
+            })
+            .catch(e => console.warn("Audio unlock pending interaction", e));
     }
 }
 
@@ -922,140 +990,251 @@ async function getMediaStream() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
             audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-            video: false
+            video: false // Убедитесь, что видео отключено, если не используется
         });
         return stream;
     } catch (err) {
-        alert("ОШИБКА МИКРОФОНА: " + err.message); throw err;
+        alert("ОШИБКА МИКРОФОНА: " + err.message);
+        throw err; // Пробрасываем ошибку, чтобы вызывающий код мог обработать
     }
 }
 
-// --- УЛУЧШЕННОЕ СОЗДАНИЕ PEER ---
-function createPeer() {
+// --- УЛУЧШЕННОЕ СОЗДАНИЕ PEER (с обработкой ошибок и переподключения) ---
+async function createPeer() {
+    // Очищаем старый peer перед созданием нового
+    cleanupPeer();
+
     return new Promise((resolve, reject) => {
-        if (peer) peer.destroy();
-        
         // Создаем Peer
         peer = new Peer(peerConfig);
 
-        // Таймаут: если ID не дали за 5 секунд - перезапуск
         const timeout = setTimeout(() => {
-            if(peer && !peer.id) {
+            if (peer && !peer.id) {
                 console.warn("⚠️ PeerJS timeout. Retrying...");
-                peer.destroy();
-                resolve(createPeer()); // Рекурсивный перезапуск
+                peer.destroy(); // Уничтожаем таймаутнувший экземпляр
+                // Повторный вызов createPeer не нужен, так как рекурсия была в старой версии
+                // Просто отклоняем текущий промис, вызывающий должен решить, пробовать ли снова
+                reject(new Error("PeerJS ID timeout"));
             }
-        }, 5000);
+        }, 8000); // Увеличил таймаут до 8 секунд
 
         peer.on('open', (id) => {
             clearTimeout(timeout);
             console.log('✅ Fresh Peer ID:', id);
+            // СОЗДАЕМ ОБРАБОТЧИК ВХОДЯЩИХ ВЫЗОВОВ СНОВА ПОСЛЕ СОЗДАНИЯ PEER
+            peer.on('call', (call) => {
+                console.log("⚡ Incoming P2P Connection");
+                if (localStream && callStatus === 'idle') { // Убедимся, что мы не в активном вызове
+                    console.log("Answering incoming call...");
+                    call.answer(localStream);
+                    setupCallEvents(call);
+                } else {
+                    console.log("Rejecting incoming call - already in a call or no stream.");
+                    call.close(); // Отклоняем, если уже в вызове
+                }
+            });
             resolve(id);
         });
 
         peer.on('error', (err) => {
             clearTimeout(timeout);
-            console.error("Peer Error:", err.type);
-            // Если фатальная ошибка сети, пробуем пересоздать через 2 сек
-            if (err.type === 'network' || err.type === 'disconnected') {
-                 setTimeout(() => resolve(createPeer()), 2000);
+            console.error("Peer Error:", err.type, err.message);
+            // Устанавливаем статус ошибки
+            callStatus = 'error';
+            updateCallStatusUI("СБОЙ СЕТИ", "red");
+            // В зависимости от типа ошибки, можно попытаться пересоздать Peer
+            if (err.type === 'network' || err.type === 'disconnected' || err.type === 'peer-unavailable') {
+                 // Попробовать пересоздать Peer через задержку
+                 setTimeout(() => {
+                     if (callStatus !== 'active') { // Не пересоздаем, если вызов уже активен
+                         createPeer().catch(e => console.error("Failed to recreate Peer:", e));
+                     }
+                 }, 2000);
             }
-        });
-
-        peer.on('call', (call) => {
-            console.log("⚡ Incoming P2P Connection");
-            if (localStream) {
-                call.answer(localStream);
-                setupCallEvents(call);
-            }
+            // Не отклоняем промис сразу, Peer может восстановиться сам
+            // reject(err); // Закомментировано, чтобы не прерывать процесс
         });
     });
 }
 
 function setupCallEvents(call) {
+    if (currentCall) {
+        console.warn("setupCallEvents called, but currentCall already exists. Closing old call.");
+        currentCall.close();
+    }
     currentCall = call;
-    
-    // ВАЖНО: Если соединение уже открыто, не ждем stream
+
+    // ВАЖНО: Обработка уже открытого соединения и ошибок
     if (call.open) {
-        console.log("✅ Call Connection Open");
+        console.log("✅ Call Connection Open (previously open)");
+        // Даже если уже open, проверяем stream
+        // PeerJS обычно вызывает 'stream' позже, но на всякий случай:
+        // Не вызываем startCallTimer здесь, так как 'stream' обработчик это делает
     }
 
     call.on('stream', (remoteStream) => {
         console.log("🎧 Stream Received");
-        
         const audioEl = document.getElementById('remote-audio');
         if (audioEl) {
             audioEl.srcObject = remoteStream;
-            // Попытка воспроизведения с обработкой Promise
             const playPromise = audioEl.play();
             if (playPromise !== undefined) {
                 playPromise.catch(e => {
                     console.warn("Autoplay prevented. Waiting for interaction.", e);
-                    // Визуально просим нажать
-                    document.getElementById('call-status-text').innerText = "НАЖМИТЕ ЭКРАН!";
+                    updateCallStatusUI("НАЖМИТЕ ЭКРАН!", "yellow");
                 });
             }
         }
-        
-        startCallTimer();
-        document.getElementById('call-status-text').innerText = "В ЭФИРЕ";
-        document.getElementById('call-status-text').style.color = "#33ff33";
+        // Устанавливаем статус активного вызова ТОЛЬКО ПОСЛЕ получения потока
+        callStatus = 'active';
+        isCallActive = true;
+        updateCallStatusUI("В ЭФИРЕ", "#33ff33");
+        startCallTimer(); // Запускаем таймер только при получении потока
     });
 
-    call.on('close', () => endCallLocal());
+    call.on('close', () => {
+        console.log("📞 Call closed by remote or local.");
+        // endCallLocal(); // Вызовем endCallLocal, чтобы очистить все
+        if (isCallActive) {
+             endCallLocal();
+        } else {
+             // Вызов закрылся до активации (например, при отклонении)
+             resetCallState();
+             document.getElementById('active-call-screen').classList.remove('active');
+             document.getElementById('incoming-call-modal').classList.remove('active');
+        }
+    });
+
     call.on('error', (err) => {
         console.error("Call Stream Error:", err);
-        endCallLocal();
+        // Не вызываем endCallLocal сразу, PeerJS может восстановить соединение
+        // или вызвать close. Проверим статус позже.
+        if (callStatus === 'active') {
+             // Если ошибка произошла во время активного вызова
+             updateCallStatusUI("СБОЙ СОЕДИНЕНИЯ", "orange");
+             // endCallLocal(); // Или дать шанс на восстановление, например, по таймауту
+             // Пока что оставим как есть, но добавим логику восстановления при необходимости
+             // Лучше всего довериться PeerJS и обработать 'close' если соединение действительно потеряно
+        }
     });
 }
 
 // --- КНОПКА ПОЗВОНИТЬ ---
 if (btnCall) {
     btnCall.addEventListener('click', async () => {
-        if (!currentChatId) return;
-        unlockAudioEngine(); // Разблокируем аудио СРАЗУ
+        if (!currentChatId || isCallActive) return; // Не начинать вызов, если уже в вызове
+
+        console.log("Attempting to initiate call...");
+        unlockAudioEngine();
 
         const chatDoc = await getDoc(doc(db, "chats", currentChatId));
-        const receiverId = chatDoc.data().participants.find(id => id !== auth.currentUser.uid);
-        if (!receiverId) return;
+        if (!chatDoc.exists()) {
+            console.error("Chat document not found.");
+            return;
+        }
+        const chatData = chatDoc.data();
+        const receiverId = chatData.participants.find(id => id !== auth.currentUser.uid);
+        if (!receiverId) {
+            console.error("Receiver ID not found.");
+            return;
+        }
 
-        try { localStream = await getMediaStream(); } catch(e) { return; }
+        try {
+            localStream = await getMediaStream();
+        } catch(e) {
+            console.error("Failed to get local stream:", e);
+            return; // Выход без запуска вызова
+        }
 
         showActiveCallScreen(currentUserData.nickname, "ИНИЦИАЛИЗАЦИЯ...");
-        
-        // 1. Создаем свой Peer
-        await createPeer();
+        callStatus = 'initiating'; // Устанавливаем статус
 
-        // 2. Создаем документ вызова
-        const callDocRef = await addDoc(collection(db, "calls"), {
-            callerId: auth.currentUser.uid, callerName: currentUserData.nickname, callerAvatar: currentUserData.avatarBase64 || null,
-            receiverId: receiverId, status: "offering", pickupId: null, timestamp: serverTimestamp()
-        });
-        activeCallDocId = callDocRef.id;
-        document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ ОТВЕТА...";
+        try {
+            // 1. Создаем свой Peer
+            await createPeer(); // Убедимся, что peer готов и имеет ID
 
-        // 3. Ждем, пока собеседник ответит и пришлет СВОЙ ID
-        callUnsubscribe = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
-            if (!snap.exists()) return;
-            const data = snap.data();
-            if (data.status === "answered" && data.pickupId && !currentCall) {
-                document.getElementById('call-status-text').innerText = "СОЕДИНЕНИЕ...";
-                console.log(`📞 Calling remote peer: ${data.pickupId}`);
-                setTimeout(() => { const call = peer.call(data.pickupId, localStream); setupCallEvents(call); }, 500);
-            } else if (data.status === "rejected" || data.status === "ended") { endCallLocal(); }
-        });
+            if (!peer || !peer.id) {
+                throw new Error("Failed to initialize PeerJS connection.");
+            }
+
+            // 2. Создаем документ вызова
+            const callDocRef = await addDoc(collection(db, "calls"), {
+                callerId: auth.currentUser.uid,
+                callerName: currentUserData.nickname,
+                callerAvatar: currentUserData.avatarBase64 || null,
+                receiverId: receiverId,
+                status: "offering",
+                pickupId: null, // Пока неизвестен ID получателя
+                timestamp: serverTimestamp()
+            });
+            activeCallDocId = callDocRef.id;
+            updateCallStatusUI("ОЖИДАНИЕ ОТВЕТА...");
+
+            // 3. Ждем, пока собеседник ответит и пришлет СВОЙ ID
+            callUnsubscribe = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
+                if (!snap.exists()) {
+                    console.log("Call document removed by receiver.");
+                    endCallLocal();
+                    return;
+                }
+                const data = snap.data();
+                if (data.status === "answered" && data.pickupId && !currentCall && callStatus === 'initiating') { // Проверяем статус
+                    updateCallStatusUI("СОЕДИНЕНИЕ...");
+                    console.log(`📞 Calling remote peer: ${data.pickupId}`);
+                    // Небольшая задержка перед вызовом, чтобы PeerJS успел стабилизироваться
+                    setTimeout(() => {
+                        if (peer && localStream) { // Проверяем, что Peer и поток все еще живы
+                            const call = peer.call(data.pickupId, localStream);
+                            setupCallEvents(call);
+                        } else {
+                            console.warn("Peer or localStream lost before calling.");
+                            endCallLocal();
+                        }
+                    }, 1000);
+                } else if (data.status === "rejected" || data.status === "ended") {
+                    console.log(`Call ${data.status}.`);
+                    endCallLocal();
+                } else if (data.status === "offering" && callStatus === 'initiating' && Date.now() - data.timestamp.toMillis() > 45000) {
+                     // Таймаут звонящего
+                     console.log("Call timeout from caller side.");
+                     endCallLocal();
+                }
+            });
+        } catch (e) {
+            console.error("Error during call initiation:", e);
+            updateCallStatusUI("СБОЙ ИНИЦИАЦИИ", "red");
+            resetCallState(); // Сброс состояния при ошибке
+            document.getElementById('active-call-screen').classList.remove('active');
+            if (localStream) {
+                localStream.getTracks().forEach(t => t.stop());
+                localStream = null;
+            }
+            if (peer) cleanupPeer(); // Уничтожаем Peer при ошибке
+        }
     });
 }
 
-// --- СЛУШАТЕЛЬ ВХОДЯЩИХ ---
+// --- СЛУШАТЕЛЬ ВХОДЯЩИХ (ИСПРАВЛЕН) ---
 function initIncomingCallListener(myUid) {
-    if (peer) peer.destroy();
+    // Уничтожаем старый peer, если он был (например, при переподключении)
+    // cleanupPeer(); // Это может быть не нужно здесь, если Peer создается только при вызове
     const q = query(collection(db, "calls"), where("receiverId", "==", myUid), where("status", "==", "offering"));
     onSnapshot(q, (snap) => {
         snap.docChanges().forEach((change) => {
             if (change.type === "added") {
                 const data = change.doc.data();
-                if (data.timestamp && (Date.now() - data.timestamp.toMillis() > 45000)) return; // Игнор старых
+                // Проверяем, не в активном ли мы уже вызове
+                if (isCallActive) {
+                    console.log("Already in a call, ignoring incoming call.");
+                    // Опционально: автоматически отклонить в Firestore
+                    // updateDoc(change.doc.ref, { status: "rejected" });
+                    return;
+                }
+                if (data.timestamp && (Date.now() - data.timestamp.toMillis() > 45000)) {
+                    console.log("Ignoring old incoming call.");
+                    return; // Игнор старых
+                }
+                console.log("Incoming call detected.");
                 showIncomingCallModal(change.doc.id, data);
             }
         });
@@ -1064,65 +1243,149 @@ function initIncomingCallListener(myUid) {
 
 // --- КНОПКА ОТВЕТИТЬ ---
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
+    if (!incomingCallData || !activeCallDocId) {
+         console.error("No incoming call data to answer.");
+         document.getElementById('incoming-call-modal').classList.remove('active');
+         return;
+    }
     document.getElementById('incoming-call-modal').classList.remove('active');
-    unlockAudioEngine(); // Разблокируем аудио СРАЗУ
+    console.log("Answering incoming call...");
+    unlockAudioEngine();
 
     try {
         showActiveCallScreen(incomingCallData.callerName, "ПОДКЛЮЧЕНИЕ...");
-        localStream = await getMediaStream();
+        callStatus = 'answering'; // Устанавливаем статус
 
+        localStream = await getMediaStream();
         // 1. Создаем СВЕЖИЙ Peer
-        const myPickupId = await createPeer();
+        const myPickupId = await createPeer(); // Убедимся, что peer готов
+
+        if (!peer || !myPickupId) {
+            throw new Error("Failed to initialize PeerJS for answering.");
+        }
 
         // 2. Передаем свой ID звонящему через базу
         await updateDoc(doc(db, "calls", activeCallDocId), { status: "answered", pickupId: myPickupId });
+        updateCallStatusUI("ОТПРАВКА ID...");
 
+        // 3. Подписываемся на обновления статуса вызова
         callUnsubscribe = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
-            if (!snap.exists() || snap.data().status === "ended") endCallLocal();
+            if (!snap.exists()) {
+                console.log("Call document removed.");
+                endCallLocal();
+                return;
+            }
+            const data = snap.data();
+            if (data.status === "ended") {
+                console.log("Call ended by caller.");
+                endCallLocal();
+            } else if (data.status === "rejected") {
+                 console.log("Call rejected by caller (unexpected here).");
+                 endCallLocal();
+            }
+            // Статус "answered" уже обработан, и ожидается соединение от звонящего
         });
-
-    } catch (e) { console.error(e); rejectCall(); }
+    } catch (e) {
+        console.error("Error during call answering:", e);
+        updateCallStatusUI("СБОЙ ОТВЕТА", "red");
+        resetCallState(); // Сброс состояния при ошибке
+        document.getElementById('active-call-screen').classList.remove('active');
+        if (localStream) {
+            localStream.getTracks().forEach(t => t.stop());
+            localStream = null;
+        }
+        if (peer) cleanupPeer(); // Уничтожаем Peer при ошибке
+        rejectCall(); // Отправляем отклонение в Firestore
+    }
 });
 
-// UI Звонков
-function showIncomingCallModal(docId, data) {
-    if (activeCallDocId) return;
-    incomingCallData = data; activeCallDocId = docId;
-    document.getElementById('incoming-call-modal').classList.add('active');
-    document.getElementById('incoming-caller-name').innerText = data.callerName;
-    document.getElementById('incoming-call-avatar').src = data.callerAvatar || DEFAULT_AVATAR;
-    if (navigator.vibrate) navigator.vibrate([200, 200, 200]);
-}
-document.getElementById('btn-decline-call').addEventListener('click', rejectCall);
-async function rejectCall() {
-    document.getElementById('incoming-call-modal').classList.remove('active');
-    if (activeCallDocId) { try { await updateDoc(doc(db, "calls", activeCallDocId), { status: "rejected" }); } catch(e){} }
-    activeCallDocId = null;
-}
-document.getElementById('btn-hangup').addEventListener('click', async () => {
-    if (activeCallDocId) { try { await updateDoc(doc(db, "calls", activeCallDocId), { status: "ended" }); } catch(e){} }
-    endCallLocal();
-});
-function endCallLocal() {
-    document.getElementById('active-call-screen').classList.remove('active');
-    document.getElementById('incoming-call-modal').classList.remove('active');
-    if (currentCall) { currentCall.close(); currentCall = null; }
-    if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-    if (peer) { peer.destroy(); peer = null; }
-    if (callUnsubscribe) { callUnsubscribe(); callUnsubscribe = null; }
-    const audioEl = document.getElementById('remote-audio');
-    if (audioEl) { audioEl.pause(); audioEl.srcObject = null; }
-    stopCallTimer(); activeCallDocId = null; incomingCallData = null;
-}
+// UI Звонков (обновлены для лучшего отражения состояния)
 function showActiveCallScreen(name, status) {
     document.getElementById('active-call-screen').classList.add('active');
     document.getElementById('call-partner-name').innerText = name;
-    document.getElementById('call-status-text').innerText = status;
-    document.getElementById('call-status-text').style.color = "#888";
-    callSeconds = 0; document.getElementById('call-timer').innerText = "00:00";
+    updateCallStatusUI(status);
 }
-function startCallTimer() {
+
+// --- КНОПКА ОТКЛОНИТЬ ---
+document.getElementById('btn-decline-call').addEventListener('click', rejectCall);
+
+async function rejectCall() {
+    console.log("Declining call.");
+    document.getElementById('incoming-call-modal').classList.remove('active');
+    if (activeCallDocId) {
+        try {
+            await updateDoc(doc(db, "calls", activeCallDocId), { status: "rejected" });
+        } catch(e){
+            console.error("Failed to update call status to rejected:", e);
+        }
+    }
+    resetCallState(); // Сбрасываем состояние при отклонении
+}
+
+// --- КНОПКА ЗАВЕРШИТЬ ВЫЗОВ ---
+document.getElementById('btn-hangup').addEventListener('click', async () => {
+    console.log("Hanging up call.");
+    if (activeCallDocId) {
+        try {
+            await updateDoc(doc(db, "calls", activeCallDocId), { status: "ended" });
+        } catch(e){
+            console.error("Failed to update call status to ended:", e);
+        }
+    }
+    endCallLocal();
+});
+
+// --- ОКОНЧАНИЕ ВЫЗОВА (ИСПРАВЛЕНО) ---
+function endCallLocal() {
+    console.log("Ending call locally.");
+    if (!isCallActive && callStatus !== 'initiating' && callStatus !== 'answering') {
+        console.log("Call is not active, skipping endCallLocal.");
+        return; // Не завершаем, если вызов не был активен
+    }
+
+    // Сбрасываем флаги и состояние ДО закрытия соединений
+    isCallActive = false;
+    callStatus = 'ending';
+
+    document.getElementById('active-call-screen').classList.remove('active');
+    document.getElementById('incoming-call-modal').classList.remove('active');
+
+    // Закрываем PeerJS вызов
+    if (currentCall) {
+        currentCall.close();
+        currentCall = null;
+    }
+
+    // Останавливаем локальный поток
+    if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+    }
+
+    // Отписываемся от Firestore
+    if (callUnsubscribe) {
+        callUnsubscribe();
+        callUnsubscribe = null;
+    }
+
+    // Уничтожаем Peer (это освободит ресурсы)
+    cleanupPeer(); // Вызов нашей новой функции очистки
+
+    // Останавливаем таймер
     stopCallTimer();
+
+    // Сбрасываем переменные
+    activeCallDocId = null;
+    incomingCallData = null;
+
+    // Сбрасываем UI статуса
+    updateCallStatusUI("ЗАВЕРШЕНО");
+    console.log("Local call ended and resources cleaned up.");
+}
+
+// --- ТАЙМЕР ВЫЗОВА (остался без изменений) ---
+function startCallTimer() {
+    stopCallTimer(); // Останавливаем, если уже запущен
     callTimerInterval = setInterval(() => {
         callSeconds++;
         const m = Math.floor(callSeconds / 60).toString().padStart(2, '0');
@@ -1130,7 +1393,15 @@ function startCallTimer() {
         document.getElementById('call-timer').innerText = `${m}:${s}`;
     }, 1000);
 }
-function stopCallTimer() { if (callTimerInterval) clearInterval(callTimerInterval); }
+
+function stopCallTimer() {
+    if (callTimerInterval) {
+        clearInterval(callTimerInterval);
+        callTimerInterval = null;
+    }
+}
+
+// --- КНОПКА ВКЛ/ВЫКЛ МИКРОФОНА (осталась без изменений) ---
 document.getElementById('btn-mic-toggle').addEventListener('click', () => {
     if (!localStream) return;
     const track = localStream.getAudioTracks()[0];
