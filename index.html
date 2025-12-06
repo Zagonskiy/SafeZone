@@ -177,11 +177,12 @@
         </div>
     </div>
                         
-    <div id="image-viewer-modal" class="modal-overlay" style="z-index: 30000; background: rgba(0,0,0,0.95);">
+    <div id="image-viewer-modal" class="modal-overlay">
         <span id="close-image-viewer" class="close-btn">&times;</span>
         
         <img class="modal-content-img" id="full-image-view" style="display:none">
-        <video class="modal-content-img" id="full-video-view" controls style="display:none"></video>
+        
+        <video class="modal-content-img" id="full-video-view" controls playsinline style="display:none"></video>
         
         <div id="image-caption-view" class="caption-text"></div>
     </div>
