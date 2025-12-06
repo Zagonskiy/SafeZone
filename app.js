@@ -1433,11 +1433,42 @@ function endCallLocal() {
 
 // 8. Управление аудио и таймер
 function setupRemoteAudio(stream) {
+    console.log("🎧 Настройка аудио потока...");
     const audioEl = document.getElementById('remote-audio');
+    
+    // Сброс srcObject для надежности
+    audioEl.srcObject = null;
     audioEl.srcObject = stream;
-    audioEl.play().catch(e => console.log("Autoplay error:", e));
-    document.getElementById('call-status-text').innerText = "В ЭФИРЕ";
-    document.getElementById('call-status-text').style.color = "#33ff33";
+    
+    // Явно задаем громкость
+    audioEl.volume = 1.0;
+
+    // Пытаемся воспроизвести
+    const playPromise = audioEl.play();
+
+    if (playPromise !== undefined) {
+        playPromise.then(() => {
+            console.log("🔊 Аудио воспроизводится!");
+            document.getElementById('call-status-text').innerText = "ЗВУК ЕСТЬ";
+            document.getElementById('call-status-text').style.color = "#33ff33";
+        }).catch(error => {
+            console.warn("🔇 Автоплей заблокирован браузером. Ждем клика.", error);
+            document.getElementById('call-status-text').innerText = "НАЖМИТЕ НА ЭКРАН";
+            document.getElementById('call-status-text').style.color = "yellow";
+            
+            // Хак: Включаем звук при любом клике по экрану
+            const enableAudio = () => {
+                audioEl.play();
+                document.getElementById('call-status-text').innerText = "В ЭФИРЕ";
+                document.getElementById('call-status-text').style.color = "#33ff33";
+                document.removeEventListener('click', enableAudio);
+                document.removeEventListener('touchstart', enableAudio);
+            };
+            
+            document.addEventListener('click', enableAudio);
+            document.addEventListener('touchstart', enableAudio);
+        });
+    }
 }
 
 document.getElementById('btn-mic-toggle').addEventListener('click', () => {
