@@ -1261,8 +1261,9 @@ async function startVoiceCall(receiverId) {
     }
 
     // Показываем интерфейс
-    showActiveCallScreen(currentUserData.nickname, "СОЕДИНЕНИЕ..."); // Показываем имя пока не знаем точно
-    // Загружаем имя партнера
+    showActiveCallScreen(currentUserData.nickname, "СОЕДИНЕНИЕ..."); 
+    
+    // Пытаемся подгрузить имя партнера (косметика)
     getDoc(doc(db, "users", receiverId)).then(s => {
         if(s.exists()) document.getElementById('call-partner-name').innerText = s.data().nickname;
     });
@@ -1280,42 +1281,45 @@ async function startVoiceCall(receiverId) {
     
     activeCallDocId = callDocRef.id;
 
-    // Слушаем изменения статуса этого звонка (ответил/сбросил)
+    // --- СЛУШАЕМ ИЗМЕНЕНИЯ СТАТУСА (ГЛАВНАЯ ЛОГИКА) ---
     onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
         if (!snap.exists()) return;
         const data = snap.data();
         
+        // 1. СОБЕСЕДНИК ОТВЕТИЛ
         if (data.status === "answered") {
+            // ВАЖНО: Если мы уже в звонке, игнорируем повторные обновления
+            if (currentCall) return;
+
             document.getElementById('call-status-text').innerText = "УСТАНОВКА СВЯЗИ...";
             console.log("⚡ Собеседник ответил. Начинаем P2P соединение...");
 
             // Функция агрессивного дозвона
             let connectAttempts = 0;
-            const maxAttempts = 5; // Пробуем 5 раз (в течение 10-15 секунд)
+            const maxAttempts = 5; 
             
             const attemptConnection = () => {
                 connectAttempts++;
                 console.log(`📡 Попытка соединения #${connectAttempts} с ID: ${receiverId}`);
                 document.getElementById('call-status-text').innerText = `ПОДКЛЮЧЕНИЕ (${connectAttempts})...`;
 
-                // Пытаемся позвонить
                 const call = peer.call(receiverId, localStream);
 
                 if (!call) {
-                    console.warn("⚠️ PeerJS не вернул объект звонка (глюк библиотеки).");
+                    console.warn("⚠️ PeerJS ошибка вызова. Ретрай...");
                     if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 2000);
                     return;
                 }
 
-                // Таймер-страховка: Если через 5 секунд нет потока, пробуем снова
+                // Таймер-страховка (если зависло на "Подключение...")
                 const connectionTimeout = setTimeout(() => {
-                    console.warn("⏰ Тайм-аут соединения. Пробуем перезвонить...");
+                    console.warn("⏰ Тайм-аут. Пробую перезвонить...");
                     if (currentCall) currentCall.close();
                     if (connectAttempts < maxAttempts) attemptConnection();
                 }, 5000);
 
                 call.on('stream', (remoteStream) => {
-                    clearTimeout(connectionTimeout); // Отменяем таймер ретрая
+                    clearTimeout(connectionTimeout); 
                     console.log("✅ УРА! Поток получен!");
                     setupRemoteAudio(remoteStream);
                     startCallTimer();
@@ -1332,10 +1336,21 @@ async function startVoiceCall(receiverId) {
                 currentCall = call;
             };
 
-            // Даем телефону 1 секунду на "раздупление" после нажатия кнопки
+            // Запускаем дозвон через 1 секунду (даем телефону время проснуться)
             setTimeout(attemptConnection, 1000);
+        } 
+        // 2. ЗВОНОК ОТКЛОНЕН
+        else if (data.status === "rejected") {
+            document.getElementById('call-status-text').innerText = "ОТКЛОНЕНО";
+            logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
+            setTimeout(endCallLocal, 1500);
         }
-    }
+        // 3. ЗВОНОК ЗАВЕРШЕН
+        else if (data.status === "ended") {
+             document.getElementById('call-status-text').innerText = "ЗАВЕРШЕН";
+             setTimeout(endCallLocal, 1000);
+        }
+    });
 }
             
             // Добавляем слушатель ошибок специально для этого звонка
