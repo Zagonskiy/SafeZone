@@ -1123,7 +1123,7 @@ if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1
 // === СИСТЕМА ЗВОНКОВ (WEBRTC + FIRESTORE) ===
 // ==========================================
 
-// 1. Инициализация P2P
+// 1. Инициализация P2P (Улучшенная стабильность)
 function initPeer(uid) {
     if (peer) return;
     
@@ -1136,7 +1136,8 @@ function initPeer(uid) {
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' }
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
             ]
         }
     }); 
@@ -1160,11 +1161,9 @@ function initPeer(uid) {
             currentCall = call;
         };
 
-        // Если микрофон уже есть (мы его включили по кнопке "Ответить")
         if (localStream) {
             answerLogic(localStream);
         } else {
-            // Если вдруг это авто-ответ (редкость)
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then((s) => {
                     localStream = s;
@@ -1176,21 +1175,21 @@ function initPeer(uid) {
     
     peer.on('error', (err) => {
         console.error("🚨 PeerJS Error:", err.type, err);
-        if (err.type === 'unavailable-id') {
-            // Если ID занят, это "призрак". Убиваем и пересоздаем.
-            peer.destroy();
-            setTimeout(() => initPeer(uid), 1000);
-        }
-        if (err.type === 'network' || err.type === 'disconnected') {
-            console.log("⚠️ Network issue. Reconnecting...");
-            peer.reconnect();
+        // Если ID занят или сеть отвалилась - пробуем жесткий реконнект
+        if (err.type === 'unavailable-id' || err.type === 'network' || err.type === 'disconnected') {
+            console.log("♻️ Critical Peer Error. Reconnecting in 1s...");
+            setTimeout(() => {
+                if (!peer || peer.destroyed) return;
+                peer.reconnect();
+            }, 1000);
         }
     });
 
     peer.on('disconnected', () => {
         console.log("🔌 Peer disconnected via socket. Reconnecting...");
-        // Не дестроим, а именно реконнектим, чтобы сохранить ID
-        peer.reconnect();
+        if (peer && !peer.destroyed) {
+            peer.reconnect();
+        }
     });
 
     // ХАК: Пингуем сервер каждые 2 секунды, чтобы Telegram/Chrome не убивал сокет
@@ -1299,7 +1298,7 @@ async function startVoiceCall(receiverId) {
             console.log("⚡ Получен ответ. Ждем стабилизации сети собеседника...");
 
             let connectAttempts = 0;
-            const maxAttempts = 8; // Пытаемся дольше (около 20-30 сек)
+            const maxAttempts = 8; 
             
             const attemptConnection = () => {
                 connectAttempts++;
@@ -1317,12 +1316,11 @@ async function startVoiceCall(receiverId) {
                     return;
                 }
 
-                // Тайм-аут на одну попытку
                 const connectionTimeout = setTimeout(() => {
                     console.warn("⏰ Тайм-аут попытки. Перезапуск...");
                     if (currentCall) currentCall.close();
                     if (connectAttempts < maxAttempts) attemptConnection();
-                }, 4000); // 4 секунды на попытку
+                }, 4000); 
 
                 call.on('stream', (remoteStream) => {
                     clearTimeout(connectionTimeout); 
@@ -1336,7 +1334,6 @@ async function startVoiceCall(receiverId) {
                 call.on('error', (err) => {
                     console.error("Call Error:", err);
                     clearTimeout(connectionTimeout);
-                    // Если peer-unavailable, значит телефон еще не проснулся, пробуем снова
                     if (connectAttempts < maxAttempts) setTimeout(attemptConnection, 2000);
                 });
 
@@ -1348,9 +1345,9 @@ async function startVoiceCall(receiverId) {
 
             // Глобальный слушатель "peer-unavailable" для этого сеанса
             const retryHandler = (err) => {
-                if (err.type === 'peer-unavailable' && connectAttempts < maxAttempts) {
-                    console.log(`♻️ Абонент не в сети PeerJS. Ждем реконнекта...`);
-                    // Ничего не делаем, attemptConnection сам перезапустится по тайм-ауту или ошибке
+                // Если пир недоступен, значит он переподключается. Просто ждем следующей попытки attemptConnection
+                if (err.type === 'peer-unavailable') {
+                    console.log(`♻️ Абонент не в сети PeerJS. (Попытка ${connectAttempts}/${maxAttempts})`);
                 }
             };
             peer.on('error', retryHandler);
@@ -1380,8 +1377,7 @@ async function startVoiceCall(receiverId) {
              setTimeout(endCallLocal, 1000);
         }
     });
-}
-            
+}            
 
 // 5. Ответ на звонок (МОБИЛЬНАЯ ВЕРСИЯ + RECONNECT)
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
