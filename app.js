@@ -234,7 +234,15 @@ document.getElementById('to-login').addEventListener('click', () => {
     document.getElementById('register-form').style.display = 'none'; 
 });
 document.getElementById('back-btn').addEventListener('click', () => { 
-    chatPanel.classList.remove('open'); 
+    chatPanel.classList.remove('open');
+    // Скрыть поиск
+if(document.getElementById('btn-toggle-search')) {
+    document.getElementById('btn-toggle-search').style.display = 'none';
+    document.getElementById('chat-search-bar').style.display = 'none';
+    // Функция очистки из нового кода, можно вызвать если переменная доступна
+    // или просто вручную очистить поле
+    document.getElementById('chat-search-input').value = '';
+}
     if (unsubscribeMessages) unsubscribeMessages(); 
     currentChatId = null; 
     document.getElementById('msg-form').style.display = 'none'; 
@@ -307,6 +315,10 @@ async function openChat(chatId, chatName) {
     document.getElementById('messages-area').innerHTML = ''; 
     
     chatPanel.classList.add('open');
+    // Показать кнопку поиска
+if(document.getElementById('btn-toggle-search')) {
+    document.getElementById('btn-toggle-search').style.display = 'block';
+}
     if(searchInput) searchInput.blur(); 
 
     try {
@@ -918,3 +930,167 @@ document.getElementById('btn-del-all').addEventListener('click',async()=>{
 });
 window.deleteMsg=async(c,m)=>{if(await showModal('УДАЛИТЬ?','confirm'))await deleteDoc(doc(db,"chats",c,"messages",m));};
 window.editMsg=async(c,m,o)=>{const v=await showModal('ИЗМЕНИТЬ:','prompt',o); if(v&&v!==o)await updateDoc(doc(db,"chats",c,"messages",m),{text:v,edited:true});};
+// ==========================================
+// === ПОИСК В ЧАТЕ (ВСТАВИТЬ В КОНЕЦ) ===
+// ==========================================
+
+const btnToggleSearch = document.getElementById('btn-toggle-search');
+const searchBar = document.getElementById('chat-search-bar');
+const searchInputChat = document.getElementById('chat-search-input');
+const btnSearchUp = document.getElementById('btn-search-up');
+const btnSearchDown = document.getElementById('btn-search-down');
+const btnCloseSearch = document.getElementById('btn-close-search');
+const searchCountLabel = document.getElementById('search-count');
+
+let searchMatches = [];
+let currentMatchIndex = -1;
+
+// Показываем кнопку поиска только когда чат открыт (добавь вызов в openChat если хочешь, 
+// или используем Observer, но проще просто проверять стиль в логике интерфейса)
+// Для простоты: кнопка управляется CSS/JS при открытии чата. 
+// В функции openChat() найди строчку chatPanel.classList.add('open'); и добавь ниже:
+// if(btnToggleSearch) btnToggleSearch.style.display = 'block';
+
+// Логика переключения
+if (btnToggleSearch) {
+    btnToggleSearch.addEventListener('click', () => {
+        searchBar.style.display = 'flex';
+        searchInputChat.focus();
+    });
+}
+
+if (btnCloseSearch) {
+    btnCloseSearch.addEventListener('click', closeSearch);
+}
+
+function closeSearch() {
+    searchBar.style.display = 'none';
+    clearHighlights();
+    searchInputChat.value = '';
+    searchMatches = [];
+    currentMatchIndex = -1;
+    updateSearchCount();
+}
+
+if (searchInputChat) {
+    searchInputChat.addEventListener('input', (e) => {
+        const text = e.target.value.trim().toLowerCase();
+        clearHighlights();
+        if (text.length < 2) {
+            searchMatches = [];
+            currentMatchIndex = -1;
+            updateSearchCount();
+            return;
+        }
+        performChatSearch(text);
+    });
+    
+    // Enter для перехода к следующему
+    searchInputChat.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') navigateSearch(1);
+    });
+}
+
+function performChatSearch(text) {
+    const messages = document.querySelectorAll('#messages-area .msg');
+    searchMatches = [];
+    
+    messages.forEach(msgDiv => {
+        // Ищем только в текстовых узлах, чтобы не сломать HTML структуру картинок/видео
+        // Простой вариант: ищем внутри div, если это текст
+        // Сложный вариант (здесь): рекурсивный поиск текста
+        
+        // Для твоего кода (msg.text или подпись)
+        // Сначала очищаем старые, потом ищем
+        const content = msgDiv.innerText; 
+        if (content.toLowerCase().includes(text)) {
+           highlightTextInNode(msgDiv, text);
+        }
+    });
+
+    // Собираем все созданные спаны .highlight-match
+    searchMatches = Array.from(document.querySelectorAll('.highlight-match'));
+    if (searchMatches.length > 0) {
+        // Начинаем с последнего сообщения (как в Telegram - снизу вверх)
+        currentMatchIndex = searchMatches.length - 1;
+        focusMatch(currentMatchIndex);
+    }
+    updateSearchCount();
+}
+
+function highlightTextInNode(element, text) {
+    // Осторожная замена, чтобы не сломать теги картинок
+    // Работаем только если внутри нет input/img/video, или ищем конкретно в текстовых нодах
+    // В твоем рендере текст лежит прямо в div или в div внутри div.
+    
+    // Простой безопасный метод для твоего рендера:
+    // Если это текстовое сообщение (нет картинок внутри)
+    if (!element.querySelector('img') && !element.querySelector('video') && !element.querySelector('.audio-player-wrapper')) {
+        const innerHTML = element.innerHTML;
+        const regex = new RegExp(`(${escapeRegExp(text)})`, 'gi');
+        element.innerHTML = innerHTML.replace(regex, '<span class="highlight-match">$1</span>');
+    } 
+    // Если есть подпись к фото/видео (обычно это последний div)
+    else {
+        const children = element.childNodes;
+        children.forEach(child => {
+            if (child.nodeType === 3 && child.textContent.toLowerCase().includes(text)) { // Text node
+                const span = document.createElement('span');
+                span.innerHTML = child.textContent.replace(new RegExp(`(${escapeRegExp(text)})`, 'gi'), '<span class="highlight-match">$1</span>');
+                element.replaceChild(span, child);
+            } else if (child.nodeType === 1 && !child.tagName.match(/IMG|VIDEO|AUDIO/)) {
+                // Рекурсия для вложенных дивов (подписи)
+                 if (child.innerText.toLowerCase().includes(text)) {
+                     const regex = new RegExp(`(${escapeRegExp(text)})`, 'gi');
+                     child.innerHTML = child.innerHTML.replace(regex, '<span class="highlight-match">$1</span>');
+                 }
+            }
+        });
+    }
+}
+
+function escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
+}
+
+function clearHighlights() {
+    const highlights = document.querySelectorAll('.highlight-match, .highlight-current');
+    highlights.forEach(span => {
+        const parent = span.parentNode;
+        parent.replaceChild(document.createTextNode(span.textContent), span);
+        parent.normalize(); // Объединяет текстовые узлы обратно
+    });
+}
+
+function focusMatch(index) {
+    // Снимаем активный класс со всех
+    document.querySelectorAll('.highlight-current').forEach(el => el.classList.remove('highlight-current'));
+    
+    const el = searchMatches[index];
+    if (el) {
+        el.classList.add('highlight-current');
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    updateSearchCount();
+}
+
+function navigateSearch(direction) {
+    if (searchMatches.length === 0) return;
+    currentMatchIndex += direction;
+    
+    if (currentMatchIndex >= searchMatches.length) currentMatchIndex = 0;
+    if (currentMatchIndex < 0) currentMatchIndex = searchMatches.length - 1;
+    
+    focusMatch(currentMatchIndex);
+}
+
+function updateSearchCount() {
+    if (searchMatches.length === 0) {
+        searchCountLabel.innerText = "0/0";
+    } else {
+        searchCountLabel.innerText = `${currentMatchIndex + 1}/${searchMatches.length}`;
+    }
+}
+
+if(btnSearchUp) btnSearchUp.addEventListener('click', () => navigateSearch(-1)); // Вверх (предыдущее в списке DOM, но раннее по времени)
+if(btnSearchDown) btnSearchDown.addEventListener('click', () => navigateSearch(1)); // Вниз
