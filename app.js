@@ -1235,7 +1235,7 @@ async function startVoiceCall(receiverId) {
         return;
     }
 
-    showActiveCallScreen(currentUserData.nickname, "ПОИСК АБОНЕНТА..."); 
+    showActiveCallScreen(currentUserData.nickname, "ВЫЗОВ..."); 
     
     getDoc(doc(db, "users", receiverId)).then(s => {
         if(s.exists()) document.getElementById('call-partner-name').innerText = s.data().nickname;
@@ -1257,36 +1257,58 @@ async function startVoiceCall(receiverId) {
         if (!snap.exists()) return;
         const data = snap.data();
         
-        // Внутри onSnapshot...
         if (data.status === "answered") {
-            if (currentCall) return;
+            if (currentCall) return; // Уже в процессе
 
-            document.getElementById('call-status-text').innerText = "СОЕДИНЕНИЕ...";
+            document.getElementById('call-status-text').innerText = "ПОЛУЧЕН ОТВЕТ...";
             
-            // --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Берем специальный ID из базы, если он есть ---
+            // Берем ID, который прислал телефон
             const targetPeerId = data.pickupId || receiverId; 
-            console.log(`⚡ Звоню на точный ID: ${targetPeerId}`);
+            console.log(`⚡ Цель для звонка: ${targetPeerId}`);
 
-            // Даем телефону 1 сек на подготовку (на всякий случай)
-            setTimeout(() => {
+            let attempts = 0;
+            const maxAttempts = 5;
+
+            // Функция рекурсивного дозвона
+            const dial = () => {
+                attempts++;
+                document.getElementById('call-status-text').innerText = `СОЕДИНЕНИЕ (${attempts})...`;
+                console.log(`📡 Попытка call #${attempts}`);
+
                 const call = peer.call(targetPeerId, localStream);
 
                 if (!call) {
-                    console.error("Сбой вызова PeerJS");
+                    console.warn("⚠️ PeerJS сбой вызова.");
+                    if(attempts < maxAttempts) setTimeout(dial, 2000);
                     return;
                 }
 
+                // Если через 5 сек нет потока - сбрасываем и пробуем снова
+                const failTimer = setTimeout(() => {
+                    console.log("⏰ Тайм-аут медиа. Ретрай...");
+                    if(currentCall) currentCall.close();
+                    if(attempts < maxAttempts) dial();
+                }, 5000);
+
                 call.on('stream', (remoteStream) => {
-                    console.log("✅ Поток получен!");
+                    clearTimeout(failTimer);
+                    console.log("✅ УРА! Поток получен!");
                     setupRemoteAudio(remoteStream);
                     startCallTimer();
                 });
 
                 call.on('close', () => endCallLocal());
-                call.on('error', (e) => console.error("Call error:", e));
+                call.on('error', (e) => {
+                    console.error("Call error:", e);
+                    clearTimeout(failTimer);
+                    if(attempts < maxAttempts) setTimeout(dial, 1500);
+                });
                 
                 currentCall = call;
-            }, 1000);
+            };
+
+            // Запускаем дозвон через 1 сек (даем телефону время инициализироваться)
+            setTimeout(dial, 1000);
         } 
         else if (data.status === "rejected") {
             logCallToChat("⛔ ЗВОНОК ОТКЛОНЕН");
@@ -1297,7 +1319,7 @@ async function startVoiceCall(receiverId) {
         }
     });
 }
-// 5. Ответ на звонок (С ГЕНЕРАЦИЕЙ НОВОГО ID)
+// 5. Ответ на звонок (ИСПРАВЛЕНО: Добавлены STUN серверы)
 document.getElementById('btn-answer-call').addEventListener('click', async () => {
     document.getElementById('incoming-call-modal').classList.remove('active');
     
@@ -1306,47 +1328,69 @@ document.getElementById('btn-answer-call').addEventListener('click', async () =>
     if (audioCtx.state === 'suspended') await audioCtx.resume();
 
     try {
-        showActiveCallScreen(incomingCallData.callerName, "СОЗДАНИЕ КАНАЛА...");
+        showActiveCallScreen(incomingCallData.callerName, "НАСТРОЙКА КАНАЛА...");
         
         // 2. Получаем микрофон
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         
-        // 3. УБИВАЕМ СТАРЫЙ PEER И СОЗДАЕМ НОВЫЙ С УНИКАЛЬНЫМ ID
+        // 3. УБИВАЕМ СТАРЫЙ PEER И СОЗДАЕМ НОВЫЙ
+        // Старый мог "уснуть", нам нужен свежий
         if (peer) peer.destroy();
         
-        // Генерируем уникальный суффикс, чтобы сервер PeerJS точно принял нас
         const sessionPeerId = auth.currentUser.uid + '-' + Date.now();
-        console.log("🆕 Создаю свежий PeerID для звонка:", sessionPeerId);
+        console.log("🆕 Создаю свежий PeerID:", sessionPeerId);
 
+        // ВАЖНО: Добавляем сюда ВЕСЬ список STUN серверов, иначе 4G не пропустит звонок
         peer = new Peer(sessionPeerId, {
-            config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+            debug: 2,
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun4.l.google.com:19302' }
+                ]
+            }
         });
 
-        // Ждем, пока новый ID зарегистрируется на сервере
+        // Ждем регистрации на сервере
         peer.on('open', async (id) => {
-            console.log("✅ Сеть готова! ID:", id);
-            document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ...";
+            console.log("✅ Мобильный Peer готов! ID:", id);
+            document.getElementById('call-status-text').innerText = "ОЖИДАНИЕ СИГНАЛА...";
 
-            // Настраиваем слушатель звонка для этого нового пира
+            // Готовимся принимать звонок
             peer.on('call', (call) => {
-                console.log("📞 Соединение установлено!");
+                console.log("📞 Сигнал получен! Соединяем...");
+                document.getElementById('call-status-text').innerText = "СОЕДИНЕНИЕ...";
+                
                 call.answer(localStream);
+                
                 call.on('stream', (remoteStream) => {
+                    console.log("🔊 Звук пошел!");
                     setupRemoteAudio(remoteStream);
                     startCallTimer();
                 });
+                
                 call.on('close', () => endCallLocal());
+                call.on('error', (e) => console.error("Call error:", e));
+                
                 currentCall = call;
             });
 
-            // 4. Обновляем базу: ПЕРЕДАЕМ НОВЫЙ ID (pickupId) ЗВОНЯЩЕМУ
+            // 4. Отправляем свой новый ID звонящему через базу
             await updateDoc(doc(db, "calls", activeCallDocId), { 
                 status: "answered",
-                pickupId: id // <--- Вот этот ID будет использовать ПК
+                pickupId: id 
             });
         });
 
-        // Слушаем завершение
+        peer.on('error', (err) => {
+            console.error("Peer Error on Mobile:", err);
+            alert("Ошибка связи P2P: " + err.type);
+        });
+
+        // Слушаем завершение (если положили трубку на той стороне)
         const unsub = onSnapshot(doc(db, "calls", activeCallDocId), (snap) => {
             if (snap.exists() && snap.data().status === "ended") {
                 unsub();
