@@ -416,4 +416,67 @@ audio::-webkit-media-controls-panel { background-color: transparent !important; 
     }
     .caption-text { font-size: 0.9rem; }
 }
+/* --- ПОИСК В ЧАТЕ (ВСТАВИТЬ В КОНЕЦ) --- */
+.search-bar-overlay {
+    position: absolute;
+    top: 50px; /* Сразу под хедером */
+    left: 0;
+    width: 100%;
+    background: #111;
+    border-bottom: 2px solid var(--text-green);
+    padding: 10px;
+    display: flex;
+    gap: 10px;
+    z-index: 100;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.8);
+    box-sizing: border-box;
+}
 
+.search-bar-overlay input {
+    flex: 1;
+    height: 35px;
+    padding: 5px 10px;
+    font-size: 0.9rem;
+}
+
+.search-nav {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.search-nav button {
+    background: #333;
+    color: var(--text-green);
+    border: 1px solid var(--text-dim);
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+}
+
+.search-nav button:hover {
+    background: var(--text-dim);
+    color: #000;
+}
+
+#search-count {
+    font-size: 0.8rem;
+    color: var(--text-green);
+    min-width: 40px;
+    text-align: center;
+}
+
+/* Цвет выделения найденного текста */
+.highlight-match {
+    background-color: var(--text-green);
+    color: #000;
+    font-weight: bold;
+    border-radius: 2px;
+    box-shadow: 0 0 5px var(--text-green);
+}
+
+.highlight-current {
+    background-color: var(--alert-red);
+    color: #fff;
+    box-shadow: 0 0 10px var(--alert-red);
+}
