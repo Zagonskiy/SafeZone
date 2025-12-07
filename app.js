@@ -1590,3 +1590,30 @@ async function logCallToChat(text) {
         await updateDoc(doc(db, "chats", currentChatId), { lastUpdated: serverTimestamp() });
     } catch(e) { console.error("Log error", e); }
 }
+
+// === ПРОВЕРКА ОБНОВЛЕНИЙ (ДЛЯ ANDROID) ===
+const CURRENT_APP_VERSION = "1.0"; // Меняйте это вручную при сборке нового APK
+
+async function checkUpdates() {
+    // Проверяем, запущены ли мы в приложении (можно через UserAgent)
+    const isApp = navigator.userAgent.includes("wv"); // WebView часто добавляет 'wv'
+    if (!isApp) return;
+
+    try {
+        // Укажите прямой путь к raw файлу на github или вашему домену
+        const response = await fetch('https://ваш-логин.github.io/ваш-репо/version.json?t=' + Date.now());
+        const data = await response.json();
+        
+        if (data.version !== CURRENT_APP_VERSION) {
+            const doUpdate = await showModal(`ДОСТУПНА ВЕРСИЯ ${data.version}. ОБНОВИТЬ СИСТЕМУ?`, 'confirm');
+            if (doUpdate) {
+                window.location.href = data.apkUrl;
+            }
+        }
+    } catch (e) {
+        console.log("Update check failed", e);
+    }
+}
+
+// Запустить проверку через 5 секунд после входа
+setTimeout(checkUpdates, 5000);
